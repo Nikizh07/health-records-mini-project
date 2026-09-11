@@ -1,0 +1,155 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'mobile_app/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: 'Backend API base URL baked into the APK (e.g. https://api.example.com/api). Overrides the API_BASE_URL repo variable.'
+        required: false
+        default: ''
+      build_mode:
+        description: 'auto = release when the API URL is HTTPS, otherwise debug'
+        required: false
+        default: 'auto'
+        type: choice
+        options: [ auto, debug, release ]
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: mobile_app
+
+jobs:
+  # Tests run alongside the build so a failing test is visible without
+  # blocking the APK that the team installs on a phone.
+  test:
+    name: Analyze & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            mobile_app/android/*.gradle.kts
+            mobile_app/android/gradle/wrapper/gradle-wrapper.properties
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve build mode and API URL
+        id: cfg
+        env:
+          INPUT_URL: ${{ github.event.inputs.api_base_url }}
+          VAR_URL: ${{ vars.API_BASE_URL }}
+          MODE_INPUT: ${{ github.event.inputs.build_mode }}
+        run: |
+          set -euo pipefail
+          api_url="${INPUT_URL:-${VAR_URL:-}}"
+          mode="${MODE_INPUT:-auto}"
+
+          # A release build aborts at launch on a non-HTTPS endpoint
+          # (AppConstants.validateNetworkSecurity), so only go release when the
+          # configured URL is HTTPS. Debug builds keep working against
+          # http://localhost:3000/api via `adb reverse tcp:3000 tcp:3000`.
+          case "$api_url" in
+            https://*) secure=true ;;
+            *) secure=false ;;
+          esac
+
+          if [ "$mode" = "auto" ]; then
+            if [ "$secure" = true ]; then mode=release; else mode=debug; fi
+          elif [ "$mode" = "release" ] && [ "$secure" != true ]; then
+            echo "::error::A release build needs an HTTPS API URL. Set the API_BASE_URL repository variable (Settings > Secrets and variables > Actions > Variables) or pass one to this workflow."
+            exit 1
+          fi
+
+          if [ -z "$api_url" ]; then
+            api_url='http://localhost:3000/api'
+            echo "::notice::No API_BASE_URL configured; building a debug APK against $api_url."
+          fi
+
+          version="$(grep -m1 '^version:' pubspec.yaml | sed 's/^version:[[:space:]]*//' | cut -d'+' -f1)"
+
+          {
+            echo "mode=$mode"
+            echo "api_url=$api_url"
+            echo "version=$version"
+            echo "apk_name=migrant-health-${mode}-v${version}-${{ github.run_number }}-${GITHUB_SHA::7}.apk"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK (${{ steps.cfg.outputs.mode }})
+        run: |
+          flutter build apk --${{ steps.cfg.outputs.mode }} \
+            --build-name='${{ steps.cfg.outputs.version }}' \
+            --build-number='${{ github.run_number }}' \
+            --dart-define=API_BASE_URL='${{ steps.cfg.outputs.api_url }}'
+
+      - name: Rename APK
+        run: |
+          mv "build/app/outputs/flutter-apk/app-${{ steps.cfg.outputs.mode }}.apk" \
+             "build/app/outputs/flutter-apk/${{ steps.cfg.outputs.apk_name }}"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ steps.cfg.outputs.mode }}-${{ github.run_number }}
+          path: mobile_app/build/app/outputs/flutter-apk/${{ steps.cfg.outputs.apk_name }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          {
+            echo "### APK ready"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| File | \`${{ steps.cfg.outputs.apk_name }}\` |"
+            echo "| Build mode | \`${{ steps.cfg.outputs.mode }}\` |"
+            echo "| API base URL | \`${{ steps.cfg.outputs.api_url }}\` |"
+            echo "| Commit | \`${GITHUB_SHA::7}\` |"
+            echo
+            echo "Download it from the **Artifacts** section of this run, then \`adb install -r <file>.apk\`."
+            if [ "${{ steps.cfg.outputs.mode }}" = "debug" ]; then
+              echo
+              echo "> Debug build: run \`adb reverse tcp:3000 tcp:3000\` so \`${{ steps.cfg.outputs.api_url }}\` reaches your local backend."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -32,6 +32,15 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-11: APK build pipeline.** `.github/workflows/build-apk.yml` builds an installable Android APK on every push to `main` that touches `mobile_app/**` (plus manual `workflow_dispatch`).
+  - Two jobs: `test` (`flutter analyze` + `flutter test`) and `build`. They run in parallel, so a failing test is visible but never blocks the APK.
+  - The build mode is chosen from the API URL, because `AppConstants.validateNetworkSecurity()` makes a release build throw at launch on a non-HTTPS endpoint:
+    - no `API_BASE_URL` repository variable (today's state) → **debug** APK against `http://localhost:3000/api`, usable with `adb reverse tcp:3000 tcp:3000`;
+    - `API_BASE_URL` set to an `https://…` URL (after the AWS move) → **release** APK against it, automatically.
+    - `workflow_dispatch` can override the URL and force `debug`/`release`; forcing release without HTTPS fails with an explicit message.
+  - Output: artifact `apk-<mode>-<run number>`, file `migrant-health-<mode>-v<version>-<run>-<sha>.apk`, kept 30 days. `versionCode` is the run number, so each build is distinct.
+  - No secrets needed: the Android build has no `google-services` Gradle plugin, so Firebase comes from `lib/firebase_options.dart` and the gitignored `google-services.json` is not required. Release still signs with the debug keystore (`android/app/build.gradle.kts`) — fine for sideloading, not for Play.
+  - **Gotcha found:** the existing backend workflow is `.github/workflows/deploy-container` with **no `.yml` extension**, so GitHub Actions has never run it. Left as is — rename it to `deploy-container.yml` to turn it on.
 - **2026-09-11: Walk-in (on-the-spot) appointments.**
   - `POST /api/appointments` is now open to DOCTOR/ADMIN as well. For staff callers it takes `patient_id` from the body. The doctor defaults to the caller (`getAuthenticatedDoctorId`, now exported from `record.controller.js`), the clinic to that doctor's clinic, and the time to now. Status is `confirmed`, where patient bookings stay `pending`.
   - An ADMIN without a doctor record must pass `doctor_id`.

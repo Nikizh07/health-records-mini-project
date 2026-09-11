@@ -19,7 +19,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ├── ENABLE_ANONYMOUS_AUTH.md, GUEST_LOGIN_SETUP.md
 ├── check-firebase-config.sh
 ├── .github/workflows/
-│   └── deploy-container.yml       # CI: builds backend image, pushes to GHCR (no deploy step)
+│   ├── build-apk.yml              # CI: builds an installable Android APK on every push to main
+│   └── deploy-container           # CI: backend image → GHCR. NOTE: no .yml extension, so GitHub never runs it
 ├── scripts/
 │   └── push-docker-ghcr.ps1       # manual GHCR push
 │
