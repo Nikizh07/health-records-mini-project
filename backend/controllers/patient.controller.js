@@ -136,17 +136,32 @@ async function createPatient(req, res, next) {
  */
 async function getMyProfile(req, res, next) {
   try {
-    const user = await prisma.user.findUnique({
+    const include = { patient: true, doctor: { include: { clinic: true } } };
+    let user = await prisma.user.findUnique({
       where: { firebase_uid: req.user.uid },
-      include: {
-        patient: true,
-        doctor: {
-          include: {
-            clinic: true,
-          },
-        },
-      },
+      include,
     });
+
+    // First sign-in of a doctor onboarded by an admin: the Doctor row exists
+    // (matched by phone) but has no login yet. Link it instead of sending
+    // them to patient registration.
+    const phone = req.user.phone_number;
+    if (!user && phone) {
+      const doctor = await prisma.doctor.findFirst({
+        where: { user_id: null, OR: [{ phone }, { phone: phone.slice(-10) }] },
+      });
+      if (doctor) {
+        user = await prisma.user.create({
+          data: {
+            firebase_uid: req.user.uid,
+            phone,
+            role: 'DOCTOR',
+            doctor: { connect: { id: doctor.id } },
+          },
+          include,
+        });
+      }
+    }
 
     if (!user) {
       return res.status(404).json({

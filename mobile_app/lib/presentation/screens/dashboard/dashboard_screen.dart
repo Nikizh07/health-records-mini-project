@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../../../providers/auth_provider.dart';
+import '../clinic/clinic_shell.dart';
 import 'widgets/dashboard_header_card.dart';
 
 class DashboardScreen extends ConsumerWidget {
@@ -18,11 +19,7 @@ class DashboardScreen extends ConsumerWidget {
     final l10n = AppLocalizations.of(context) ??
         lookupAppLocalizations(const Locale('en'));
 
-    // Extract role from backend payload (default to PATIENT)
-    final userMap = authState.patientProfile?['user'] as Map<String, dynamic>?;
-    final role = (userMap?['role'] ?? authState.patientProfile?['role'] ?? 'PATIENT')
-        .toString()
-        .toUpperCase();
+    final role = authState.role;
 
     final rawName = authState.patientProfile?['name']?.toString() ?? 'User';
     final healthId = authState.patientProfile?['health_id']?.toString() ?? 'MWH-PENDING';
@@ -52,9 +49,14 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ],
       ),
-      drawer: _buildDrawer(context, ref, headerTitle, headerBadge, l10n),
+      // Staff on wide screens already have the side navigation.
+      drawer: role != 'PATIENT' && ClinicShell.isWide(context)
+          ? null
+          : _buildDrawer(context, ref, headerTitle, headerBadge, l10n),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+        child: Center(child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 960),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -74,7 +76,7 @@ class DashboardScreen extends ConsumerWidget {
             const SizedBox(height: 24),
             _buildInfoCard(role),
           ],
-        ),
+        ))),
       ),
     );
   }
@@ -104,14 +106,14 @@ class DashboardScreen extends ConsumerWidget {
       actions = [
         (Icons.calendar_today_outlined, "Today's Appointments", 'View queue and scheduled consultations', '/doctor/today-appointments'),
         (Icons.post_add_outlined, 'Add Visit Record', 'Log diagnoses, prescriptions & lab results', '/doctor/add-record'),
-        (Icons.folder_shared_outlined, l10n.healthRecords, 'Look up patient clinical history', '/records'),
+        (Icons.person_search_outlined, 'Patient Lookup', 'Search a patient and view their clinical history', '/doctor/patients'),
       ];
     } else if (role == 'ADMIN') {
       color = _adminColor;
       actions = [
         (Icons.medical_services_outlined, 'Manage Doctors', 'Onboard clinicians and assign specializations', '/admin/doctors'),
         (Icons.apartment_outlined, 'Manage Clinics', 'Configure clinics, branches and schedules', '/admin/clinics'),
-        (Icons.folder_open_outlined, 'System Health Records', 'Review clinic health data', '/records'),
+        (Icons.person_search_outlined, 'Patient Lookup', 'Search patients and review their records', '/doctor/patients'),
       ];
     } else {
       color = AppColors.primary;

@@ -11,6 +11,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
+├── DEVLOG.md                      # temporary log of the 2026-09-11 clinic-side/PC work
 ├── README.md                      # project overview (still describes GCP stack)
 ├── START_HERE.md, QUICK_START.md, SUMMARY.txt
 ├── FIREBASE_CREDENTIALS_SETUP.md, REPLACE_FIREBASE_CREDENTIALS.md, QUICK_FIREBASE_SETUP.txt
@@ -62,7 +63,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     ├── pubspec.yaml, l10n.yaml, analysis_options.yaml
     ├── flutter_launcher_icons.yaml, flutter_native_splash.yaml
     ├── assets/icons/              # app_icon.png, splash_logo.png
-    ├── test/widget_test.dart
+    ├── test/widget_test.dart, clinic_shell_test.dart (role gate),
+    │   clinic_flow_test.dart (doctor/admin screens via real router + fake services)
     ├── lib/
     │   ├── main.dart
     │   ├── firebase_options.dart  # Firebase client config (unchanged by AWS move)
@@ -88,10 +90,11 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   │   │   ├── dashboard/     # dashboard_screen + widgets/dashboard_header_card
     │   │   │   ├── appointments/  # appointments_screen, book_appointment_screen
     │   │   │   ├── records/       # records_screen, record_detail_screen (opens report URL)
-    │   │   │   ├── doctor/doctor_screens.dart
-    │   │   │   ├── admin/admin_screens.dart
+    │   │   │   ├── clinic/clinic_shell.dart   # wraps signed-in routes: auth wait, role gate, staff side nav on wide screens
+    │   │   │   ├── doctor/doctor_screens.dart # queue, add visit record, patient lookup
+    │   │   │   ├── admin/admin_screens.dart   # manage doctors, manage clinics
     │   │   │   └── profile/profile_screen.dart
-    │   │   └── widgets/           # app_error_view, custom_card, offline_banner
+    │   │   └── widgets/           # app_error_view, custom_card, offline_banner, responsive_card_list
     │   └── l10n/                  # app_en/hi/ta.arb + generated/
     ├── android/                   # app/build.gradle.kts, app/google-services.json, res/ icons+splash
     ├── ios/                       # Runner/ (AppDelegate, Info.plist, assets), Flutter/ xcconfigs

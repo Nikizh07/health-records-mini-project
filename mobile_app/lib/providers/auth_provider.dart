@@ -40,6 +40,13 @@ class AuthState {
   bool get isAuthenticated =>
       status == AuthStatus.authenticated && idToken != null;
 
+  /// PATIENT / DOCTOR / ADMIN, from the backend profile payload.
+  String get role => ((patientProfile?['user'] as Map?)?['role'] ??
+          patientProfile?['role'] ??
+          'PATIENT')
+      .toString()
+      .toUpperCase();
+
   AuthState copyWith({
     AuthStatus? status,
     String? phoneNumber,

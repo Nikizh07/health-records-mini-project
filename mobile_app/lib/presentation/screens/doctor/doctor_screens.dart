@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/doctor_provider.dart';
 import '../../../providers/records_provider.dart';
+import '../../widgets/responsive_card_list.dart';
+import '../clinic/clinic_shell.dart';
 
 // ============================================================================
 // 1. DOCTOR'S "TODAY'S APPOINTMENTS" SCREEN (Day 20 - Task 1)
@@ -15,47 +18,7 @@ class DoctorTodayAppointmentsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final authState = ref.watch(authNotifierProvider);
-    final userMap = authState.patientProfile?['user'] as Map<String, dynamic>?;
-    final role = (userMap?['role'] ?? authState.patientProfile?['role'] ?? 'PATIENT')
-        .toString()
-        .toUpperCase();
-
-    // Guard: Doctor & Admin only
-    if (role != 'DOCTOR' && role != 'ADMIN') {
-      return Scaffold(
-        appBar: AppBar(title: const Text("Today's Appointments")),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.lock_outline, size: 64, color: Colors.redAccent),
-                const SizedBox(height: 16),
-                const Text(
-                  'Access Restricted',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'This portal is only accessible to verified Clinical Practitioners (DOCTOR role). Your current role is $role.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: () => context.go('/'),
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Back to Dashboard'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
+    // Role gate lives in ClinicShell.
     final selectedDate = ref.watch(doctorSelectedDateProvider);
     final statusFilter = ref.watch(doctorStatusFilterProvider);
     final appointmentsAsync = ref.watch(doctorTodayAppointmentsProvider);
@@ -293,10 +256,8 @@ class DoctorTodayAppointmentsScreen extends ConsumerWidget {
                     );
                   }
 
-                  return ListView.separated(
-                    padding: const EdgeInsets.all(16),
+                  return ResponsiveCardList(
                     itemCount: appointments.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final appt = appointments[index];
                       final patient =
@@ -737,11 +698,13 @@ class _PatientSearchSectionState extends ConsumerState<_PatientSearchSection> {
               children: [
                 const Icon(Icons.check_circle, color: Color(0xFF2E7D32), size: 18),
                 const SizedBox(width: 8),
-                const Text(
-                  'Patient Identification',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                const Expanded(
+                  child: Text(
+                    'Patient Identification',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
                 ),
-                const Spacer(),
                 TextButton.icon(
                   onPressed: _clearSelection,
                   icon: const Icon(Icons.edit_outlined, size: 16),
@@ -1246,6 +1209,7 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
 
       // Invalidate appointment queue so the status updates to 'completed'
       ref.invalidate(doctorTodayAppointmentsProvider);
+      ref.invalidate(_patientHistoryProvider);
 
       if (!mounted) return;
 
@@ -1309,13 +1273,18 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(ctx); // close dialog
-                context.pop(); // return to queue
+                // Opened from the side nav there is nothing to pop.
+                if (context.canPop()) {
+                  context.pop();
+                } else {
+                  context.go('/doctor/today-appointments');
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF006D77),
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Back to Queue'),
+              child: const Text('Done'),
             ),
           ],
         ),
@@ -1354,8 +1323,17 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
         title: const Text('Add Visit Notes'),
         elevation: 0,
       ),
-      body: SingleChildScrollView(
+      // Ctrl+Enter saves from any field (PC data entry).
+      body: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.enter, control: true): () {
+            if (!_isSubmitting) _submitRecord();
+          },
+        },
+        child: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
+        child: Center(child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 880),
         child: Form(
           key: _formKey,
           autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -1662,11 +1640,21 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
                   ),
                 ),
               ),
+              if (ClinicShell.isWide(context))
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Tip: Ctrl + Enter saves the visit',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    ),
+                  ),
+                ),
               const SizedBox(height: 32),
             ],
           ),
-        ),
-      ),
+        ))),
+      )),
     );
   }
 }
@@ -1688,6 +1676,60 @@ class _PrescriptionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final medicine = TextFormField(
+      controller: entry.medicineController,
+      decoration: InputDecoration(
+        labelText: 'Medicine Name *',
+        hintText: 'e.g. Amoxicillin / Paracetamol',
+        prefixIcon: const Icon(Icons.medication, size: 18),
+        isDense: true,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        filled: true,
+        fillColor: Colors.grey.shade50,
+      ),
+      validator: (val) {
+        final v = val?.trim() ?? '';
+        if (v.isEmpty) return 'Medicine name is required';
+        if (v.length < 2) return 'Enter a valid medicine name';
+        if (v.length > 100) return 'Name too long (max 100 chars)';
+        return null;
+      },
+    );
+    final dosage = TextFormField(
+      controller: entry.dosageController,
+      decoration: InputDecoration(
+        labelText: 'Dosage *',
+        hintText: 'e.g. 500mg TDS',
+        isDense: true,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        filled: true,
+        fillColor: Colors.grey.shade50,
+      ),
+      validator: (val) {
+        final v = val?.trim() ?? '';
+        if (v.isEmpty) return 'Dosage is required';
+        if (v.length < 2) return 'Enter valid dosage (e.g. 500mg)';
+        return null;
+      },
+    );
+    final duration = TextFormField(
+      controller: entry.durationController,
+      decoration: InputDecoration(
+        labelText: 'Duration *',
+        hintText: 'e.g. 5 days',
+        isDense: true,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        filled: true,
+        fillColor: Colors.grey.shade50,
+      ),
+      validator: (val) {
+        final v = val?.trim() ?? '';
+        if (v.isEmpty) return 'Duration required';
+        if (v.length < 2) return 'Enter valid duration';
+        return null;
+      },
+    );
+
     return Card(
       elevation: 0.5,
       margin: EdgeInsets.zero,
@@ -1736,70 +1778,33 @@ class _PrescriptionCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            TextFormField(
-              controller: entry.medicineController,
-              decoration: InputDecoration(
-                labelText: 'Medicine Name *',
-                hintText: 'e.g. Amoxicillin / Paracetamol',
-                prefixIcon: const Icon(Icons.medication, size: 18),
-                isDense: true,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                filled: true,
-                fillColor: Colors.grey.shade50,
-              ),
-              validator: (val) {
-                final v = val?.trim() ?? '';
-                if (v.isEmpty) return 'Medicine name is required';
-                if (v.length < 2) return 'Enter a valid medicine name';
-                if (v.length > 100) return 'Name too long (max 100 chars)';
-                return null;
-              },
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: TextFormField(
-                    controller: entry.dosageController,
-                    decoration: InputDecoration(
-                      labelText: 'Dosage *',
-                      hintText: 'e.g. 500mg TDS',
-                      isDense: true,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      filled: true,
-                      fillColor: Colors.grey.shade50,
+            // Wide screens: one line per medicine, faster to scan and type on PC.
+            LayoutBuilder(
+              builder: (context, constraints) => constraints.maxWidth >= 640
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 4, child: medicine),
+                        const SizedBox(width: 10),
+                        Expanded(flex: 3, child: dosage),
+                        const SizedBox(width: 10),
+                        Expanded(flex: 2, child: duration),
+                      ],
+                    )
+                  : Column(
+                      children: [
+                        medicine,
+                        const SizedBox(height: 10),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(flex: 3, child: dosage),
+                            const SizedBox(width: 10),
+                            Expanded(flex: 2, child: duration),
+                          ],
+                        ),
+                      ],
                     ),
-                    validator: (val) {
-                      final v = val?.trim() ?? '';
-                      if (v.isEmpty) return 'Dosage is required';
-                      if (v.length < 2) return 'Enter valid dosage (e.g. 500mg)';
-                      return null;
-                    },
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  flex: 2,
-                  child: TextFormField(
-                    controller: entry.durationController,
-                    decoration: InputDecoration(
-                      labelText: 'Duration *',
-                      hintText: 'e.g. 5 days',
-                      isDense: true,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      filled: true,
-                      fillColor: Colors.grey.shade50,
-                    ),
-                    validator: (val) {
-                      final v = val?.trim() ?? '';
-                      if (v.isEmpty) return 'Duration required';
-                      if (v.length < 2) return 'Enter valid duration';
-                      return null;
-                    },
-                  ),
-                ),
-              ],
             ),
           ],
         ),
@@ -1808,3 +1813,200 @@ class _PrescriptionCard extends StatelessWidget {
   }
 }
 
+// ============================================================================
+// 4. PATIENT LOOKUP — search a patient, see their cross-clinic history
+// ============================================================================
+
+final _patientHistoryProvider = FutureProvider.autoDispose
+    .family<List<Map<String, dynamic>>, String>((ref, patientId) async {
+  final token = ref.watch(authTokenProvider);
+  if (token == null) throw Exception('User is not authenticated.');
+  return ref
+      .watch(recordServiceProvider)
+      .getPatientRecords(idToken: token, patientId: patientId);
+});
+
+class DoctorPatientLookupScreen extends StatefulWidget {
+  const DoctorPatientLookupScreen({super.key});
+
+  @override
+  State<DoctorPatientLookupScreen> createState() =>
+      _DoctorPatientLookupScreenState();
+}
+
+class _DoctorPatientLookupScreenState extends State<DoctorPatientLookupScreen> {
+  Map<String, dynamic>? _patient;
+
+  @override
+  Widget build(BuildContext context) {
+    final search = _PatientSearchSection(
+      selectedPatient: _patient,
+      onPatientSelected: (p) =>
+          setState(() => _patient = p['_clear'] == true ? null : p),
+    );
+    final history = _patient == null
+        ? const _LookupHint()
+        : _PatientHistory(patient: _patient!);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FA),
+      appBar: AppBar(title: const Text('Patient Lookup')),
+      body: LayoutBuilder(builder: (context, constraints) {
+        // PC: search on the left, history on the right.
+        if (constraints.maxWidth >= 900) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 400,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: search,
+                ),
+              ),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: history,
+                ),
+              ),
+            ],
+          );
+        }
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [search, const SizedBox(height: 16), history],
+        );
+      }),
+    );
+  }
+}
+
+class _LookupHint extends StatelessWidget {
+  const _LookupHint();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 16),
+      child: Column(
+        children: [
+          Icon(Icons.person_search_outlined, size: 56, color: Colors.grey.shade400),
+          const SizedBox(height: 12),
+          Text(
+            'Search for a patient to see their medical history across all clinics.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PatientHistory extends ConsumerWidget {
+  final Map<String, dynamic> patient;
+
+  const _PatientHistory({required this.patient});
+
+  static String _subtitle(Map<String, dynamic> r) {
+    final parts = <String>[];
+    final date = DateTime.tryParse((r['visit_date'] ?? r['created_at'] ?? '').toString());
+    if (date != null) parts.add(DateFormat('dd MMM yyyy').format(date.toLocal()));
+    final doctor = (r['doctor'] as Map?)?['name']?.toString();
+    if (doctor != null) parts.add(doctor.startsWith('Dr.') ? doctor : 'Dr. $doctor');
+    final meds = (r['prescriptions'] as List?)?.length ?? 0;
+    if (meds > 0) parts.add('$meds meds');
+    return parts.join(' · ');
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final patientId = patient['id'].toString();
+    final historyAsync = ref.watch(_patientHistoryProvider(patientId));
+    final clinicName = (ref.watch(authNotifierProvider).patientProfile?['clinic']
+            as Map?)?['name']
+        ?.toString();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Medical history',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2B2D42),
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh',
+              onPressed: () => ref.invalidate(_patientHistoryProvider(patientId)),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed: () => context.push('/doctor/add-record', extra: {
+                'patient_id': patientId,
+                'patient_name': patient['name']?.toString() ?? 'Unnamed Patient',
+                'health_id': patient['health_id']?.toString() ?? 'MWH-N/A',
+                'clinic_name': clinicName ?? 'Clinic',
+              }),
+              icon: const Icon(Icons.post_add_outlined, size: 18),
+              label: const Text('New visit'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        historyAsync.when(
+          loading: () => const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (err, _) => Text(
+            err.toString().replaceAll('Exception: ', ''),
+            style: const TextStyle(color: Colors.redAccent),
+          ),
+          data: (records) {
+            if (records.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  'No visits recorded for this patient yet.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey.shade600),
+                ),
+              );
+            }
+            return Column(
+              children: [
+                for (final r in records)
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: ListTile(
+                      leading: const Icon(Icons.description_outlined,
+                          color: Color(0xFF006D77)),
+                      title: Text(
+                        r['diagnosis']?.toString() ?? 'Consultation',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text(_subtitle(r)),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/records/${r['id']}', extra: r),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}

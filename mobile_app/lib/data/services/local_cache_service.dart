@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:hive_flutter/hive_flutter.dart';
 
 /// Lightweight local storage service using Hive.
@@ -12,7 +13,12 @@ class LocalCacheService {
 
   /// Initializes Hive and opens the persistent storage box.
   /// Called in main() during app startup.
-  static Future<void> init() async {
+  /// [inMemory] is for tests: no disk, no path_provider plugin.
+  static Future<void> init({bool inMemory = false}) async {
+    if (inMemory) {
+      _box = await Hive.openBox(_boxName, bytes: Uint8List(0));
+      return;
+    }
     await Hive.initFlutter();
     _box = await Hive.openBox(_boxName);
   }

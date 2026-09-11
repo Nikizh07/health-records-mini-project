@@ -1,9 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../../providers/admin_provider.dart';
 import '../../../providers/appointment_provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../widgets/responsive_card_list.dart';
+import '../clinic/clinic_shell.dart';
+
+/// Bottom sheet on phones, centred dialog on wide (PC / web) screens.
+void _showFormSheet(BuildContext context, Widget sheet) {
+  if (ClinicShell.isWide(context)) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        clipBehavior: Clip.antiAlias,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: sheet,
+        ),
+      ),
+    );
+  } else {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => sheet,
+    );
+  }
+}
 
 // ============================================================================
 // 3. ADMIN "MANAGE DOCTORS" SCREEN (Day 20 - Task 3)
@@ -21,47 +45,7 @@ class _AdminManageDoctorsScreenState extends ConsumerState<AdminManageDoctorsScr
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authNotifierProvider);
-    final userMap = authState.patientProfile?['user'] as Map<String, dynamic>?;
-    final role = (userMap?['role'] ?? authState.patientProfile?['role'] ?? 'PATIENT')
-        .toString()
-        .toUpperCase();
-
-    // Guard: ADMIN only
-    if (role != 'ADMIN') {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Manage Doctors')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.lock_outline, size: 64, color: Colors.redAccent),
-                const SizedBox(height: 16),
-                const Text(
-                  'Access Restricted',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'This console is only accessible to System Administrators (ADMIN role). Your current role is $role.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: () => context.go('/'),
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Back to Dashboard'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
+    // Role gate lives in ClinicShell.
     final doctorsAsync = ref.watch(adminDoctorsProvider);
 
     return Scaffold(
@@ -205,10 +189,8 @@ class _AdminManageDoctorsScreenState extends ConsumerState<AdminManageDoctorsScr
                     );
                   }
 
-                  return ListView.separated(
-                    padding: const EdgeInsets.all(16),
+                  return ResponsiveCardList(
                     itemCount: filtered.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final doc = filtered[index];
                       return _DoctorDirectoryCard(doctor: doc);
@@ -231,12 +213,7 @@ class _AdminManageDoctorsScreenState extends ConsumerState<AdminManageDoctorsScr
   }
 
   void _openAddDoctorModal(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => const _AddDoctorModalSheet(),
-    );
+    _showFormSheet(context, const _AddDoctorModalSheet());
   }
 }
 
@@ -708,47 +685,7 @@ class _AdminManageClinicsScreenState extends ConsumerState<AdminManageClinicsScr
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authNotifierProvider);
-    final userMap = authState.patientProfile?['user'] as Map<String, dynamic>?;
-    final role = (userMap?['role'] ?? authState.patientProfile?['role'] ?? 'PATIENT')
-        .toString()
-        .toUpperCase();
-
-    // Guard: ADMIN only
-    if (role != 'ADMIN') {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Manage Clinics')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.lock_outline, size: 64, color: Colors.redAccent),
-                const SizedBox(height: 16),
-                const Text(
-                  'Access Restricted',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'This console is only accessible to System Administrators (ADMIN role). Your current role is $role.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: () => context.go('/'),
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Back to Dashboard'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
+    // Role gate lives in ClinicShell.
     final clinicsAsync = ref.watch(adminClinicsProvider);
 
     return Scaffold(
@@ -889,10 +826,8 @@ class _AdminManageClinicsScreenState extends ConsumerState<AdminManageClinicsScr
                     );
                   }
 
-                  return ListView.separated(
-                    padding: const EdgeInsets.all(16),
+                  return ResponsiveCardList(
                     itemCount: filtered.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 14),
                     itemBuilder: (context, index) {
                       final clinic = filtered[index];
                       return _ClinicFacilityCard(
@@ -911,12 +846,7 @@ class _AdminManageClinicsScreenState extends ConsumerState<AdminManageClinicsScr
   }
 
   void _openEditClinicModal(BuildContext context, Map<String, dynamic> clinic) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _EditClinicModalSheet(clinic: clinic),
-    );
+    _showFormSheet(context, _EditClinicModalSheet(clinic: clinic));
   }
 }
 
