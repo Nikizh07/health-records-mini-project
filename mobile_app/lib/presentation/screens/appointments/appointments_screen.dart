@@ -262,7 +262,7 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen> {
       );
 
       if (context.mounted) {
-        Navigator.of(context).pop(); // Dismiss loading dialog
+        Navigator.of(context, rootNavigator: true).pop(); // Dismiss loading dialog (on root navigator)
         ref.invalidate(myAppointmentsProvider);
 
         final formattedNewDate = DateFormat('EEE, d MMM yyyy • h:mm a').format(newSlotDateTime);
@@ -287,7 +287,7 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen> {
       }
     } on SlotTakenException {
       if (context.mounted) {
-        Navigator.of(context).pop(); // Dismiss loading dialog
+        Navigator.of(context, rootNavigator: true).pop(); // Dismiss loading dialog (on root navigator)
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
@@ -315,7 +315,7 @@ class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen> {
       }
     } catch (e) {
       if (context.mounted) {
-        Navigator.of(context).pop(); // Dismiss loading dialog
+        Navigator.of(context, rootNavigator: true).pop(); // Dismiss loading dialog (on root navigator)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red.shade700,

@@ -126,7 +126,7 @@ class _BookAppointmentScreenState
     showDialog<void>(
       context: context,
       barrierDismissible: false, // user must press Done
-      builder: (_) => Dialog(
+      builder: (dialogContext) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Padding(
           padding: const EdgeInsets.all(28),
@@ -185,7 +185,9 @@ class _BookAppointmentScreenState
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   onPressed: () {
-                    Navigator.of(context).pop(); // dismiss dialog
+                    // Dialog lives on the root navigator; the screen's context
+                    // resolves to the ShellRoute's nested one, so pop via the dialog.
+                    Navigator.of(dialogContext).pop();
                     notifier.reset(); // wipe wizard state
                     context.go('/'); // back to Dashboard
                   },

@@ -28,6 +28,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - All API services must build their client with `createApiClient()` (`mobile_app/lib/core/network/api_client.dart`). It swaps in a fresh Firebase ID token per request; tokens expire after 1 hour.
 - The clinic side targets **Flutter web** for PC use. Linux/Windows desktop builds can't do Firebase phone auth. Release builds refuse a non-HTTPS `API_BASE_URL` (`AppConstants.validateNetworkSecurity`), so test locally with `flutter build web --profile` or `flutter run -d chrome`.
 - The first ADMIN still has to be created with `backend/scripts/set-user-role.js <phone> ADMIN`. The account must have signed in once. Guest accounts are stored with the phone `guest-<uid>`.
+- Since the `ShellRoute` (2026-09-11), `showDialog` puts dialogs on the **root** navigator, but `Navigator.of(screenContext)` resolves to the shell's nested one. Close dialogs with the builder's own context (`builder: (dialogContext) => … Navigator.of(dialogContext).pop()`) or with `Navigator.of(context, rootNavigator: true).pop()`. Otherwise the dialog stays open, as with the booking "Done" button and the reschedule loading dialog, which are now fixed.
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog

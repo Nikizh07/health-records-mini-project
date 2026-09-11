@@ -53,6 +53,37 @@ class DashboardScreen extends ConsumerWidget {
       drawer: role != 'PATIENT' && ClinicShell.isWide(context)
           ? null
           : _buildDrawer(context, ref, headerTitle, headerBadge, l10n),
+      // Placeholder for the future health-assistant chatbot (voice-first).
+      floatingActionButton: role == 'PATIENT'
+          ? FloatingActionButton(
+              tooltip: 'Health assistant',
+              onPressed: () => showModalBottomSheet(
+                context: context,
+                builder: (_) => const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 20, 20, 32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Health assistant',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      SizedBox(height: 4),
+                      Text('Coming soon: ask questions by typing or speaking.'),
+                      SizedBox(height: 16),
+                      TextField(
+                        enabled: false,
+                        decoration: InputDecoration(
+                          hintText: 'Type or tap the mic…',
+                          suffixIcon: Icon(Icons.mic_none),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              child: const Icon(Icons.chat_bubble_outline),
+            )
+          : null,
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
         child: Center(child: ConstrainedBox(
