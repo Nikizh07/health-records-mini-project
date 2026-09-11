@@ -28,6 +28,7 @@ This project addresses that gap with a **multi-tenant, cloud-hosted health recor
 - **OTP-based authentication** — phone number login via Firebase Auth, no passwords to manage
 - **Cross-clinic appointment booking** — book, reschedule, or cancel appointments at any participating clinic
 - **Digital medical records** — diagnosis, prescriptions, and visit notes stored centrally and accessible instantly
+- **Live updates** — the doctor's queue and the patient's appointments and records refresh every 10 s while open, so a booking or a saved visit shows up on the other side without a manual refresh
 - **File uploads** — scanned lab reports and prescriptions stored securely in the cloud
 - **Push notifications** — automated appointment reminders via Firebase Cloud Messaging
 - **Role-based access** — separate views for patients, doctors, and clinic admins
@@ -86,7 +87,7 @@ Full schema with field types and constraints is documented in [`docs/database-sc
 
 ```
 project-root/
-├── mobile/                 # Flutter app
+├── mobile_app/             # Flutter app (Android + web for the clinic side)
 │   └── lib/
 │       ├── core/            # constants, theme, utils
 │       ├── data/             # models, repositories, services
@@ -125,10 +126,27 @@ npm run dev
 
 ### Mobile app setup
 ```bash
-cd mobile
+cd mobile_app
 flutter pub get
-flutter run
+flutter run --dart-define=API_BASE_URL=http://<host>:3000/api
 ```
+`API_BASE_URL` defaults to `http://localhost:3000/api`. Release builds only accept an `https://` URL, so run debug or `--profile` builds locally.
+
+### Running the doctor portal locally (web)
+The clinic side (doctor/admin) is built for a PC browser. Keep the window at least 800 px wide to get the side navigation.
+
+1. **Backend:** `cd backend && npm run dev`
+2. **Patient app** at http://localhost:5000: run `cd mobile_app && flutter run -d web-server --web-port 5000`, click *Continue as guest* and register.
+3. **Doctor portal** at http://localhost:5001: build with `cd mobile_app && flutter build web --profile`, then serve it with `python3 -m http.server 5001 --directory build/web`. Open it in a **separate browser profile or a private window**, because Firebase keeps one login per browser.
+4. **Test doctor login:** phone `9999900001`, OTP `123456`. This needs three things:
+   - In the Firebase console, go to Authentication → Sign-in method → Phone → *Phone numbers for testing* and add `+91 9999900001` with code `123456`.
+   - Authentication → Settings → *SMS region policy* must allow India.
+   - A doctor with that phone must exist. An admin can add one in the admin portal, or an API client can call `POST /api/doctors`. The first login with that number links the account as DOCTOR. To turn an existing account into a doctor instead, run `node backend/scripts/set-user-role.js <phone> DOCTOR "<name>" "<specialization>"`.
+5. **The flow:**
+   - The patient books *Central Migrant Health Hub* → the doctor, for today.
+   - The appointment appears in the doctor's queue within about 10 s.
+   - The doctor opens it and saves the visit (Ctrl+Enter), which marks the appointment completed.
+   - The patient's *My Appointments* and *Health Records* show the update within about 10 s.
 
 ---
 

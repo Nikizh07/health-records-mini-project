@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd mobile_app && flutter run -d web-server --web-port 5000 --web-hostname localhost"],
+      "port": 5000
+    },
+    {
+      "name": "web-doctor",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5001", "--bind", "localhost", "--directory", "mobile_app/build/web"],
+      "port": 5001
+    }
+  ]
+}

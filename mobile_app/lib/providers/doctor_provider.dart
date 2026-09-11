@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'appointment_provider.dart';
 import 'auth_provider.dart';
@@ -15,6 +17,10 @@ final doctorStatusFilterProvider = StateProvider.autoDispose<String?>((ref) {
 /// Fetches appointments for the logged-in doctor on the selected date
 final doctorTodayAppointmentsProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  // ponytail: 10s polling while the queue is open; swap for FCM/websocket push if load matters.
+  final poll = Timer(const Duration(seconds: 10), ref.invalidateSelf);
+  ref.onDispose(poll.cancel);
+
   final token = ref.watch(authTokenProvider);
   if (token == null) throw Exception('User is not authenticated.');
 

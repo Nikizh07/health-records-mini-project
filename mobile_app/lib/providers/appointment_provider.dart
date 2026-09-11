@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import '../core/models/cached_result.dart';
@@ -123,6 +125,10 @@ final doctorsForClinicProvider =
 /// Falls back to Hive offline cache when network is unavailable.
 final myAppointmentsProvider =
     FutureProvider.autoDispose<CachedResult<List<Map<String, dynamic>>>>((ref) async {
+  // ponytail: 10s polling so doctor-side status changes show up; push later if needed.
+  final poll = Timer(const Duration(seconds: 10), ref.invalidateSelf);
+  ref.onDispose(poll.cancel);
+
   final authState = ref.watch(authNotifierProvider);
   final token = authState.idToken;
   final patientId = authState.patientProfile?['id']?.toString() ??

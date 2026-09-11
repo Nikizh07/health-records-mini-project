@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/models/cached_result.dart';
 import '../data/services/local_cache_service.dart';
@@ -11,6 +13,10 @@ final recordServiceProvider = Provider<RecordService>((ref) {
 /// Fetches medical history for the currently logged-in patient with offline caching fallback.
 final patientRecordsProvider =
     FutureProvider.autoDispose<CachedResult<List<Map<String, dynamic>>>>((ref) async {
+  // ponytail: 10s polling so new doctor records show up; push later if needed.
+  final poll = Timer(const Duration(seconds: 10), ref.invalidateSelf);
+  ref.onDispose(poll.cancel);
+
   final authState = ref.watch(authNotifierProvider);
   final token = authState.idToken;
   final patientId = authState.patientProfile?['id']?.toString() ??

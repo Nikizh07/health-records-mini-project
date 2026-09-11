@@ -11,6 +11,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
+├── .claude/launch.json            # local preview servers: web (:5000 debug), web-doctor (:5001 profile build)
 ├── DEVLOG.md                      # temporary log of the 2026-09-11 clinic-side/PC work
 ├── README.md                      # project overview (still describes GCP stack)
 ├── START_HERE.md, QUICK_START.md, SUMMARY.txt
