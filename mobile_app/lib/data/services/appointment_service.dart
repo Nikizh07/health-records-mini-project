@@ -105,6 +105,30 @@ class AppointmentService {
     }
   }
 
+  /// Doctor/admin creates an on-the-spot (walk-in) appointment for a patient.
+  /// The backend defaults the doctor to the caller, the clinic to theirs and
+  /// the time to now, and marks it confirmed.
+  Future<Map<String, dynamic>> createWalkIn({
+    required String idToken,
+    required String patientId,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/appointments',
+        data: {'patient_id': patientId},
+        options: Options(headers: {'Authorization': 'Bearer $idToken'}),
+      );
+
+      if ((response.statusCode == 200 || response.statusCode == 201) &&
+          response.data['success'] == true) {
+        return response.data['data'] as Map<String, dynamic>;
+      }
+      throw ApiException(response.data['message']?.toString() ?? 'Could not add walk-in.');
+    } on DioException catch (e) {
+      throw ApiException.fromDioException(e);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // GET /api/appointments (Doctor & Admin view)
   // ---------------------------------------------------------------------------

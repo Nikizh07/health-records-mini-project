@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import '../../../providers/appointment_provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/doctor_provider.dart';
 import '../../../providers/records_provider.dart';
@@ -1921,6 +1922,41 @@ class _PatientHistory extends ConsumerWidget {
     return parts.join(' · ');
   }
 
+  Future<void> _addWalkIn(
+    BuildContext context,
+    WidgetRef ref,
+    String patientId,
+    String? clinicName,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final router = GoRouter.of(context);
+    try {
+      final appt = await ref.read(appointmentServiceProvider).createWalkIn(
+            idToken: ref.read(authTokenProvider) ?? '',
+            patientId: patientId,
+          );
+      ref.invalidate(doctorTodayAppointmentsProvider);
+      messenger.showSnackBar(SnackBar(
+        content: const Text(
+            "Walk-in added to today's queue. The patient can see it in their app."),
+        action: SnackBarAction(
+          label: 'Start visit',
+          onPressed: () => router.push('/doctor/add-record', extra: {
+            'patient_id': patientId,
+            'patient_name': patient['name']?.toString() ?? 'Unnamed Patient',
+            'health_id': patient['health_id']?.toString() ?? 'MWH-N/A',
+            'appointment_id': appt['id']?.toString() ?? '',
+            'clinic_name': clinicName ?? 'Clinic',
+          }),
+        ),
+      ));
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final patientId = patient['id'].toString();
@@ -1948,6 +1984,12 @@ class _PatientHistory extends ConsumerWidget {
               icon: const Icon(Icons.refresh),
               tooltip: 'Refresh',
               onPressed: () => ref.invalidate(_patientHistoryProvider(patientId)),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: () => _addWalkIn(context, ref, patientId, clinicName),
+              icon: const Icon(Icons.how_to_reg_outlined, size: 18),
+              label: const Text('Walk-in'),
             ),
             const SizedBox(width: 8),
             FilledButton.icon(

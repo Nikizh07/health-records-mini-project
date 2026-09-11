@@ -13,6 +13,7 @@
 'use strict';
 
 const prisma = require('../config/prisma');
+const { getAuthenticatedDoctorId } = require('./record.controller');
 
 // Reusable UUID validator regex (8-4-4-4-12)
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -109,19 +110,57 @@ async function bookAppointment(req, res, next) {
       }
     }
 
-    const doctor_id = (body.doctor_id || body.doctorID || body.doctorId) ? String(body.doctor_id || body.doctorID || body.doctorId).trim() : null;
-    const clinic_id = (body.clinic_id || body.clinicID || body.clinicId) ? String(body.clinic_id || body.clinicID || body.clinicId).trim() : null;
-    const slot_time = (body.slot_time || body.slotTime) ? String(body.slot_time || body.slotTime).trim() : null;
+    let doctor_id = (body.doctor_id || body.doctorID || body.doctorId) ? String(body.doctor_id || body.doctorID || body.doctorId).trim() : null;
+    let clinic_id = (body.clinic_id || body.clinicID || body.clinicId) ? String(body.clinic_id || body.clinicID || body.clinicId).trim() : null;
+    let slot_time = (body.slot_time || body.slotTime) ? String(body.slot_time || body.slotTime).trim() : null;
 
-    // ── 1. Resolve Patient ID from Authenticated User ─────────
-    const patient_id = await getAuthenticatedPatientId(req);
+    // Staff (DOCTOR/ADMIN) create on-the-spot walk-ins for a given patient:
+    // doctor defaults to the caller, clinic to that doctor's clinic, time to now.
+    const userRole = (req.user?.role || 'PATIENT').toUpperCase();
+    const isStaff = userRole === 'DOCTOR' || userRole === 'ADMIN';
 
-    if (!patient_id) {
-      return res.status(404).json({
-        success: false,
-        error: 'Not Found',
-        message: 'Patient profile not found. Please complete patient registration first via POST /api/patients.',
+    // ── 1. Resolve Patient ID ────────────────────────────────
+    let patient_id;
+    if (isStaff) {
+      patient_id = body.patient_id ? String(body.patient_id).trim() : null;
+      if (!patient_id || !UUID_REGEX.test(patient_id)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bad Request',
+          message: 'Field "patient_id" is required and must be a valid UUID.',
+        });
+      }
+      const patientExists = await prisma.patient.findUnique({
+        where: { id: patient_id },
+        select: { id: true },
       });
+      if (!patientExists) {
+        return res.status(404).json({
+          success: false,
+          error: 'Not Found',
+          message: `Patient with ID "${patient_id}" does not exist.`,
+        });
+      }
+
+      doctor_id = doctor_id || await getAuthenticatedDoctorId(req);
+      if (doctor_id && !clinic_id && UUID_REGEX.test(doctor_id)) {
+        const doc = await prisma.doctor.findUnique({
+          where: { id: doctor_id },
+          select: { clinic_id: true },
+        });
+        clinic_id = doc?.clinic_id || null;
+      }
+      slot_time = slot_time || new Date().toISOString();
+    } else {
+      patient_id = await getAuthenticatedPatientId(req);
+
+      if (!patient_id) {
+        return res.status(404).json({
+          success: false,
+          error: 'Not Found',
+          message: 'Patient profile not found. Please complete patient registration first via POST /api/patients.',
+        });
+      }
     }
 
     // ── 2. Validate Input Fields ─────────────────────────────
@@ -201,7 +240,7 @@ async function bookAppointment(req, res, next) {
         doctor_id,
         clinic_id,
         slot_time: parsedSlotTime,
-        status: 'pending', // Default status upon booking
+        status: isStaff ? 'confirmed' : 'pending', // walk-ins are confirmed on the spot
       },
       include: APPOINTMENT_INCLUDE,
     });

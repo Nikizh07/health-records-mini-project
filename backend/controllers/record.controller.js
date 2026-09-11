@@ -559,6 +559,7 @@ async function uploadReportFile(req, res, next) {
 
 module.exports = {
   createMedicalRecord,
+  getAuthenticatedDoctorId,
   getPatientMedicalHistory,
   getMedicalRecordById,
   uploadReportFile,

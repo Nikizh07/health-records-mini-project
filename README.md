@@ -147,6 +147,7 @@ The clinic side (doctor/admin) is built for a PC browser. Keep the window at lea
    - The appointment appears in the doctor's queue within about 10 s.
    - The doctor opens it and saves the visit (Ctrl+Enter), which marks the appointment completed.
    - The patient's *My Appointments* and *Health Records* show the update within about 10 s.
+   - **Walk-ins:** a doctor can also open *Patient Lookup*, find the patient and click **Walk-in**. This creates a confirmed appointment for right now, puts it in the doctor's queue, and shows it in the patient's *My Appointments*. The snackbar's *Start visit* opens the visit form for that appointment.
 
 ---
 

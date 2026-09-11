@@ -31,6 +31,12 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-11: Walk-in (on-the-spot) appointments.**
+  - `POST /api/appointments` is now open to DOCTOR/ADMIN as well. For staff callers it takes `patient_id` from the body. The doctor defaults to the caller (`getAuthenticatedDoctorId`, now exported from `record.controller.js`), the clinic to that doctor's clinic, and the time to now. Status is `confirmed`, where patient bookings stay `pending`.
+  - An ADMIN without a doctor record must pass `doctor_id`.
+  - App: a "Walk-in" button next to "New visit" on `/doctor/patients`. It calls `AppointmentService.createWalkIn`, refreshes the queue, and shows a snackbar with a "Start visit" action that opens the visit form linked to the appointment.
+  - The patient sees the walk-in in My Appointments via the 10 s polling.
+  - Checked with a scratch script against the local DB (3/3, rows cleaned up).
 - **2026-09-11: Live doctor↔patient updates.** Three providers now poll every 10 s, only while their screen is open: `doctorTodayAppointmentsProvider`, `myAppointmentsProvider` and `patientRecordsProvider` (`Timer` + `ref.invalidateSelf`). Verified by the user end to end:
   - the patient books, and the booking appears in the doctor's queue;
   - the doctor saves a visit linked to the appointment, which marks it completed (existing `createMedicalRecord` behaviour);

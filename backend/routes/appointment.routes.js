@@ -26,9 +26,10 @@ router.use(authenticate);
 /**
  * @route   POST /api/appointments
  * @desc    Book a new appointment with conflict checking
- * @access  Private — PATIENT only
+ *          (DOCTOR/ADMIN: on-the-spot walk-in for body.patient_id)
+ * @access  Private — PATIENT, DOCTOR, ADMIN
  */
-router.post('/', requireRole('PATIENT'), appointmentCtrl.bookAppointment);
+router.post('/', requireRole('PATIENT', 'DOCTOR', 'ADMIN'), appointmentCtrl.bookAppointment);
 
 /**
  * @route   GET /api/appointments/me
