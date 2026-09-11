@@ -1,0 +1,19 @@
+flutter_native_splash:
+  # ── Background colour ─────────────────────────────────────────
+  color: "#FFFFFF"
+
+  # ── Logo image ────────────────────────────────────────────────
+  image: assets/icons/splash_logo.png
+
+  # ── Android 12+ (Material You SplashScreen API) ──────────────
+  android_12:
+    color: "#FFFFFF"
+    image: assets/icons/splash_logo.png
+    icon_background_color: "#FFFFFF"
+
+  # ── Gravity / alignment ───────────────────────────────────────
+  android_gravity: center
+  ios_content_mode: center
+
+  # ── Status bar ────────────────────────────────────────────────
+  fullscreen: false

@@ -1,0 +1,1190 @@
+{
+  "info": {
+    "_postman_id": "c8f29d10-8b1e-450f-90e2-e1a531d0442a",
+    "name": "Migrant Worker Clinic API - Phase 2 Regression Suite",
+    "description": "Complete API testing collection for Cloud-Based Digital Health Record & Appointment Management System for Migrant Worker Clinics.\n\nOrganized by module with automated environment variable capture for continuous regression testing.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00. Health & Auth Check",
+      "item": [
+        {
+          "name": "Health Check (Public)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Server is OK\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(\"OK\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "health"]
+            },
+            "description": "Public health check endpoint to ensure server is online."
+          }
+        },
+        {
+          "name": "Verify Admin Role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Role is ADMIN\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.user.role).to.eql(\"ADMIN\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/protected/admin",
+              "host": ["{{base_url}}"],
+              "path": ["api", "protected", "admin"]
+            }
+          }
+        },
+        {
+          "name": "Verify Doctor Role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{doctor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/protected/doctor",
+              "host": ["{{base_url}}"],
+              "path": ["api", "protected", "doctor"]
+            }
+          }
+        },
+        {
+          "name": "Verify Patient Role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/protected/patient",
+              "host": ["{{base_url}}"],
+              "path": ["api", "protected", "patient"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "01. Clinic Module",
+      "item": [
+        {
+          "name": "1. Create Clinic (Admin Only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.id) {",
+                  "    pm.environment.set(\"clinic_id\", json.data.id);",
+                  "    console.log(\"Saved clinic_id:\", json.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Klang Community Migrant Health Centre\",\n  \"location\": \"Lot 45, Jalan Meru Industrial Estate, 41050 Klang, Selangor\",\n  \"contact_number\": \"+60333445566\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/clinics",
+              "host": ["{{base_url}}"],
+              "path": ["api", "clinics"]
+            }
+          }
+        },
+        {
+          "name": "2. Get All Clinics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Clinics array returned\", function () {",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/clinics",
+              "host": ["{{base_url}}"],
+              "path": ["api", "clinics"]
+            }
+          }
+        },
+        {
+          "name": "3. Get Clinic By ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Returns correct clinic\", function () {",
+                  "    pm.expect(json.data.id).to.eql(pm.environment.get(\"clinic_id\"));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/clinics/{{clinic_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "clinics", "{{clinic_id}}"]
+            }
+          }
+        },
+        {
+          "name": "4. Update Clinic (Admin Only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contact_number\": \"+60333449999\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/clinics/{{clinic_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "clinics", "{{clinic_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02. Doctor Module",
+      "item": [
+        {
+          "name": "1. Create Doctor (Admin Only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.id) {",
+                  "    pm.environment.set(\"doctor_id\", json.data.id);",
+                  "    console.log(\"Saved doctor_id:\", json.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dr. Siti Aminah\",\n  \"clinic_id\": \"{{clinic_id}}\",\n  \"specialization\": \"General Medicine & Occupational Health\",\n  \"phone\": \"+60189998877\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/doctors",
+              "host": ["{{base_url}}"],
+              "path": ["api", "doctors"]
+            }
+          }
+        },
+        {
+          "name": "2. Get All Doctors",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/doctors",
+              "host": ["{{base_url}}"],
+              "path": ["api", "doctors"]
+            }
+          }
+        },
+        {
+          "name": "3. Filter Doctors By Clinic",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/doctors?clinic_id={{clinic_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "doctors"],
+              "query": [
+                {
+                  "key": "clinic_id",
+                  "value": "{{clinic_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "4. Get Doctor By ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/doctors/{{doctor_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "doctors", "{{doctor_id}}"]
+            }
+          }
+        },
+        {
+          "name": "5. Update Doctor (Admin Only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"specialization\": \"Senior Occupational Health & Respiratory Specialist\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/doctors/{{doctor_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "doctors", "{{doctor_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03. Patient Module",
+      "item": [
+        {
+          "name": "1. Register Patient Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var json = pm.response.json();",
+                  "    pm.environment.set(\"patient_id\", json.data.id);",
+                  "    pm.environment.set(\"patient_health_id\", json.data.health_id);",
+                  "    console.log(\"Registered patient_id:\", json.data.id);",
+                  "    console.log(\"Generated health_id:\", json.data.health_id);",
+                  "} else if (pm.response.code === 400 && pm.response.json().patient_id) {",
+                  "    // In case already registered in previous run",
+                  "    var json = pm.response.json();",
+                  "    pm.environment.set(\"patient_id\", json.patient_id);",
+                  "    pm.environment.set(\"patient_health_id\", json.health_id);",
+                  "    console.log(\"Existing patient_id loaded:\", json.patient_id);",
+                  "}",
+                  "pm.test(\"Patient registered or already exists\", function () {",
+                  "    pm.expect([201, 400]).to.include(pm.response.code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ravi Kumar\",\n  \"dob\": \"1992-06-15\",\n  \"gender\": \"Male\",\n  \"language_pref\": \"Bengali\",\n  \"phone\": \"+60123456789\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/patients",
+              "host": ["{{base_url}}"],
+              "path": ["api", "patients"]
+            }
+          }
+        },
+        {
+          "name": "2. Get My Profile (Self)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Returns patient profile\", function () {",
+                  "    pm.expect(json.data.health_id).to.not.be.empty;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/patients/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "patients", "me"]
+            }
+          }
+        },
+        {
+          "name": "3. Get Patient By ID / Health ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/patients/{{patient_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "patients", "{{patient_id}}"]
+            }
+          }
+        },
+        {
+          "name": "4. Update Patient Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_pref\": \"Bengali, Hindi\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/patients/{{patient_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "patients", "{{patient_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04. Appointment Module",
+      "item": [
+        {
+          "name": "1. Book Appointment (Patient)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Set a unique future slot time (tomorrow 10:00 AM UTC)",
+                  "var tomorrow = new Date();",
+                  "tomorrow.setDate(tomorrow.getDate() + 1);",
+                  "tomorrow.setUTCHours(10, 0, 0, 0);",
+                  "pm.environment.set(\"slot_time\", tomorrow.toISOString());"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.id) {",
+                  "    pm.environment.set(\"appointment_id\", json.data.id);",
+                  "    console.log(\"Saved appointment_id:\", json.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doctor_id\": \"{{doctor_id}}\",\n  \"clinic_id\": \"{{clinic_id}}\",\n  \"slot_time\": \"{{slot_time}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/appointments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "appointments"]
+            }
+          }
+        },
+        {
+          "name": "2. Book Duplicate Slot -> Expect 409 Conflict",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 409 Conflict\", function () {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Error indicates slot is already booked\", function () {",
+                  "    pm.expect(json.error).to.eql(\"Conflict\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doctor_id\": \"{{doctor_id}}\",\n  \"clinic_id\": \"{{clinic_id}}\",\n  \"slot_time\": \"{{slot_time}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/appointments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "appointments"]
+            }
+          }
+        },
+        {
+          "name": "3. Get My Appointments (Patient)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Appointments list returned\", function () {",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/appointments/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "appointments", "me"]
+            }
+          }
+        },
+        {
+          "name": "4. Get Doctor Schedule (Doctor/Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/appointments?doctor_id={{doctor_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "appointments"],
+              "query": [
+                {
+                  "key": "doctor_id",
+                  "value": "{{doctor_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "5. Reschedule Appointment",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var newTime = new Date();",
+                  "newTime.setDate(newTime.getDate() + 2);",
+                  "newTime.setUTCHours(14, 30, 0, 0);",
+                  "pm.environment.set(\"rescheduled_slot_time\", newTime.toISOString());"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slot_time\": \"{{rescheduled_slot_time}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/appointments/{{appointment_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "appointments", "{{appointment_id}}"]
+            }
+          }
+        },
+        {
+          "name": "6. Cancel Appointment (Soft Cancel)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Appointment status is cancelled\", function () {",
+                  "    pm.expect(json.data.status).to.eql(\"cancelled\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/appointments/{{appointment_id}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api", "appointments", "{{appointment_id}}", "cancel"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "05. Medical Records & Prescriptions",
+      "item": [
+        {
+          "name": "1. Create Medical Record + Nested Prescriptions (Doctor/Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.id) {",
+                  "    pm.environment.set(\"record_id\", json.data.id);",
+                  "    console.log(\"Saved record_id:\", json.data.id);",
+                  "}",
+                  "pm.test(\"Prescriptions were saved\", function () {",
+                  "    pm.expect(json.data.prescriptions.length).to.be.at.least(1);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patient_id\": \"{{patient_id}}\",\n  \"doctor_id\": \"{{doctor_id}}\",\n  \"visit_date\": \"2026-08-24T09:30:00.000Z\",\n  \"diagnosis\": \"Acute Occupational Bronchitis with mild wheezing due to construction silica dust exposure.\",\n  \"notes\": \"Patient advised to wear certified N95 respirator at worksite. Recommended 3 days rest and return for follow-up if symptoms persist.\",\n  \"prescriptions\": [\n    {\n      \"medicine_name\": \"Amoxicillin 500mg\",\n      \"dosage\": \"1 capsule 3 times daily after meals\",\n      \"duration\": \"5 days\"\n    },\n    {\n      \"medicine_name\": \"Salbutamol Inhaler 100mcg\",\n      \"dosage\": \"2 puffs as needed every 6 hours\",\n      \"duration\": \"14 days\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/records",
+              "host": ["{{base_url}}"],
+              "path": ["api", "records"]
+            }
+          }
+        },
+        {
+          "name": "2. Get Longitudinal History by Patient ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "pm.test(\"History array returned\", function () {",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/records/patient/{{patient_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "records", "patient", "{{patient_id}}"]
+            }
+          }
+        },
+        {
+          "name": "3. Get Single Medical Record Details",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Contains doctor and prescription info\", function () {",
+                  "    pm.expect(json.data.doctor).to.be.an('object');",
+                  "    pm.expect(json.data.prescriptions).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/records/{{record_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "records", "{{record_id}}"]
+            }
+          }
+        },
+        {
+          "name": "4. Upload Lab Report / Document (Doctor/Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 400 (if no file attached)\", function () {",
+                  "    pm.expect([200, 400]).to.include(pm.response.code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "report",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/records/{{record_id}}/upload",
+              "host": ["{{base_url}}"],
+              "path": ["api", "records", "{{record_id}}", "upload"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

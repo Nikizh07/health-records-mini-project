@@ -1,0 +1,84 @@
+{
+  "@@locale": "en",
+
+  "appTitle": "Migrant Worker Health Hub",
+  "@appTitle": { "description": "The app title" },
+
+  "dashboard": "Dashboard",
+  "@dashboard": { "description": "Dashboard nav label" },
+
+  "profile": "Profile",
+  "@profile": { "description": "Profile nav label" },
+
+  "logout": "Logout",
+  "@logout": { "description": "Logout menu item" },
+
+  "bookAppointment": "Book Appointment",
+  "@bookAppointment": { "description": "Book appointment action label" },
+
+  "healthRecords": "Health Records",
+  "@healthRecords": { "description": "Health records action label" },
+
+  "myAppointments": "My Appointments",
+  "@myAppointments": { "description": "My appointments action label" },
+
+  "quickActions": "Quick Actions",
+  "@quickActions": { "description": "Section heading for quick actions" },
+
+  "welcome": "Welcome",
+  "@welcome": { "description": "Generic welcome text" },
+
+  "editProfile": "Edit Profile",
+  "@editProfile": { "description": "Edit profile button label" },
+
+  "saveChanges": "Save Changes",
+  "@saveChanges": { "description": "Save changes button label" },
+
+  "cancel": "Cancel",
+  "@cancel": { "description": "Cancel button label" },
+
+  "languagePreference": "Language Preference",
+  "@languagePreference": { "description": "Language preference label" },
+
+  "name": "Name",
+  "@name": { "description": "Name field label" },
+
+  "dateOfBirth": "Date of Birth",
+  "@dateOfBirth": { "description": "Date of birth field label" },
+
+  "gender": "Gender",
+  "@gender": { "description": "Gender field label" },
+
+  "healthId": "Health ID",
+  "@healthId": { "description": "Health ID field label" },
+
+  "phone": "Phone",
+  "@phone": { "description": "Phone number field label" },
+
+  "profileTitle": "My Profile",
+  "@profileTitle": { "description": "Profile screen title" },
+
+  "doctorPortal": "Doctor Portal",
+  "@doctorPortal": { "description": "App bar title for doctor role" },
+
+  "adminConsole": "Admin Console",
+  "@adminConsole": { "description": "App bar title for admin role" },
+
+  "clinicHealthHub": "Clinic Health Hub",
+  "@clinicHealthHub": { "description": "App bar title for patient role" },
+
+  "saving": "Saving…",
+  "@saving": { "description": "Saving in progress text" },
+
+  "profileUpdated": "Profile updated successfully!",
+  "@profileUpdated": { "description": "Success message after profile update" },
+
+  "specialization": "Specialization",
+  "@specialization": { "description": "Doctor specialization field label" },
+
+  "clinic": "Clinic",
+  "@clinic": { "description": "Clinic field label" },
+
+  "accountInfo": "Account Information",
+  "@accountInfo": { "description": "Section heading for account info" }
+}

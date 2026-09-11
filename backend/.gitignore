@@ -1,0 +1,22 @@
+# Backend-specific ignores (in addition to root .gitignore)
+
+# Dependencies — never commit these, they're installed via npm install
+node_modules/
+
+# Real environment file — NEVER commit this
+.env
+.env.local
+.env.*.local
+
+# Firebase service account key (downloaded from Firebase Console)
+firebase-adminsdk*.json
+service-account*.json
+*.pem
+*.key
+
+# Logs
+*.log
+npm-debug.log*
+
+# Build / compile output (if added later)
+dist/

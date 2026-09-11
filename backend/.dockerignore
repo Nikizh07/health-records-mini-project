@@ -1,0 +1,25 @@
+# Ignore dependencies installed on the host machine
+node_modules
+npm-debug.log
+
+# Ignore environment variables and secrets (NEVER bake these into images!)
+.env
+.env.*
+firebase-adminsdk*.json
+service-account*.json
+*.pem
+*.key
+
+# Ignore local git and documentation
+.git
+.gitignore
+*.md
+
+# Ignore local uploaded files
+uploads/*
+!uploads/.gitkeep
+
+# Ignore Docker files themselves
+Dockerfile*
+.dockerignore
+.docker

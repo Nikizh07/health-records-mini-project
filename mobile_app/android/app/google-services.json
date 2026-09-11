@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "708133570010",
+    "project_id": "migrant-workers-89bb8",
+    "storage_bucket": "migrant-workers-89bb8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:708133570010:android:587b19ea33c0c8f4656ce3",
+        "android_client_info": {
+          "package_name": "com.migranthealth.mobile_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBBe_gT78akptIrR72yhIoS65Yfyzmk1dI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

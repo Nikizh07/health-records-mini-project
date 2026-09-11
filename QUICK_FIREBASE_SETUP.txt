@@ -1,0 +1,114 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║               QUICK FIREBASE SETUP - Replace Your Friend's Creds          ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ 🎯 GOAL: Use YOUR Firebase project instead of your friend's              │
+└───────────────────────────────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ STEP 1: Create Firebase Project (5 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🌐 Go to: https://console.firebase.google.com/
+  
+  1. Click "Add project"
+  2. Name: "my-health-clinic" (or anything)
+  3. Disable Analytics (for now)
+  4. Click "Create project"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ STEP 2: Register Android App (3 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  In your new Firebase project:
+  
+  1. Click Android icon (🤖)
+  2. Package name: com.migranthealth.mobile_app
+  3. Download "google-services.json"
+  4. Place in: mobile_app/android/app/google-services.json
+  5. Click Continue → Skip rest
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ STEP 3: Auto-Configure Flutter App (2 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Run these commands:
+
+  $ cd mobile_app
+
+  $ dart pub global activate flutterfire_cli
+
+  $ flutterfire configure
+
+  → Select your project from the list
+  → Choose platforms: Android (✓), iOS (✓), Web (✓)
+  → This auto-generates firebase_options.dart with YOUR credentials!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ STEP 4: Enable Authentication (2 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  In Firebase Console:
+  
+  1. Authentication → Get started
+  2. Sign-in method tab
+  3. Enable "Anonymous" (for guest login) ✅
+  4. Enable "Phone" (for OTP - requires billing) ⚠️
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ STEP 5: Setup Backend (3 minutes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  In Firebase Console:
+  
+  1. ⚙️ Settings → Project settings
+  2. Service accounts tab
+  3. "Generate new private key" → Download JSON
+  4. Rename to: firebase-adminsdk.json
+  5. Move to: backend/config/firebase-adminsdk.json
+
+  Edit backend/.env:
+  
+  FIREBASE_PROJECT_ID=your-new-project-id
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ STEP 6: Test Guest Login (1 minute)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  $ cd mobile_app
+  $ flutter clean
+  $ flutter pub get
+  $ flutter run
+
+  → Click "Continue as Guest (Testing)"
+  → Should authenticate ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ OPTIONAL: Enable Phone OTP (requires billing)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  🌐 Go to: https://console.cloud.google.com/
+  
+  1. Select your Firebase project
+  2. Billing → Link billing account
+  3. Add payment method
+  
+  Free tier: 10,000 phone verifications/month
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  FILES THAT WILL BE REPLACED/UPDATED:                                    ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  ✅ mobile_app/lib/firebase_options.dart (auto-generated)                ║
+║  ✅ mobile_app/android/app/google-services.json (download)               ║
+║  ✅ backend/config/firebase-adminsdk.json (download)                     ║
+║  ✅ backend/.env (edit FIREBASE_PROJECT_ID)                              ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║  🎉 DONE! You're now using YOUR Firebase project!                        ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+For detailed instructions, see: REPLACE_FIREBASE_CREDENTIALS.md

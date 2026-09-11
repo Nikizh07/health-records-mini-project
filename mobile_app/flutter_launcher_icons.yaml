@@ -1,0 +1,17 @@
+flutter_launcher_icons:
+  # Base image path — required even when using adaptive icons
+  image_path: "assets/icons/app_icon.png"
+
+  # ── Android ──────────────────────────────────────────────────
+  android: true
+  # Adaptive icon on Android 8+ (API 26+):
+  # foreground = the icon graphic, background = solid teal colour
+  adaptive_icon_foreground: "assets/icons/app_icon.png"
+  adaptive_icon_background: "#006A6A"
+
+  # ── iOS ──────────────────────────────────────────────────────
+  ios: true
+  image_path_ios: "assets/icons/app_icon.png"
+
+  # ── Min SDK (keeps legacy icon for older Android devices) ────
+  min_sdk_android: 21

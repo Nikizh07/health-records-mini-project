@@ -1,0 +1,160 @@
+// prisma/schema.prisma
+// Prisma Schema for Migrant Worker Clinics System
+// NOTE: Database URL is configured in prisma/prisma.config.ts (Prisma v7+)
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ------------------------------------------------------------
+// Enums
+// ------------------------------------------------------------
+enum AppointmentStatus {
+  pending
+  confirmed
+  cancelled
+  completed
+}
+
+enum Role {
+  PATIENT
+  DOCTOR
+  ADMIN
+}
+
+// ------------------------------------------------------------
+// 0. User Entity (Authentication & Role Mapping)
+// ------------------------------------------------------------
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  firebase_uid String   @unique
+  phone        String   @unique
+  role         Role     @default(PATIENT)
+  created_at   DateTime @default(now())
+
+  patient Patient?
+  doctor  Doctor?
+
+  @@map("users")
+}
+
+// ------------------------------------------------------------
+// 1. Patient Entity
+// ------------------------------------------------------------
+model Patient {
+  id            String   @id @default(uuid()) @db.Uuid
+  user_id       String?  @unique @db.Uuid
+  health_id     String   @unique
+  name          String
+  phone         String   @unique
+  dob           DateTime
+  gender        String
+  language_pref String
+  created_at    DateTime @default(now())
+
+  user            User?           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  appointments    Appointment[]
+  medical_records MedicalRecord[]
+
+  @@map("patients")
+}
+
+// ------------------------------------------------------------
+// 2. Clinic Entity
+// ------------------------------------------------------------
+model Clinic {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  location       String
+  contact_number String
+  latitude       Float?
+  longitude      Float?
+  created_at     DateTime @default(now())
+
+  doctors      Doctor[]
+  appointments Appointment[]
+
+  @@map("clinics")
+}
+
+// ------------------------------------------------------------
+// 3. Doctor Entity
+// ------------------------------------------------------------
+model Doctor {
+  id             String   @id @default(uuid()) @db.Uuid
+  user_id        String?  @unique @db.Uuid
+  clinic_id      String   @db.Uuid
+  name           String
+  specialization String
+  phone          String   @unique
+  created_at     DateTime @default(now())
+
+  user            User?           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  clinic          Clinic          @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  appointments    Appointment[]
+  medical_records MedicalRecord[]
+
+  @@map("doctors")
+}
+
+// ------------------------------------------------------------
+// 4. Appointment Entity
+// ------------------------------------------------------------
+model Appointment {
+  id         String            @id @default(uuid()) @db.Uuid
+  patient_id String            @db.Uuid
+  doctor_id  String            @db.Uuid
+  clinic_id  String            @db.Uuid
+  slot_time  DateTime
+  status     AppointmentStatus @default(pending)
+  created_at DateTime          @default(now())
+
+  patient         Patient         @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  doctor          Doctor          @relation(fields: [doctor_id], references: [id], onDelete: Cascade)
+  clinic          Clinic          @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  medical_records MedicalRecord[]
+
+  @@map("appointments")
+}
+
+// ------------------------------------------------------------
+// 5. Medical Record Entity
+// ------------------------------------------------------------
+model MedicalRecord {
+  id             String   @id @default(uuid()) @db.Uuid
+  patient_id     String   @db.Uuid
+  doctor_id      String   @db.Uuid
+  appointment_id String?  @db.Uuid
+  visit_date     DateTime
+  diagnosis      String   @db.Text
+  notes          String   @db.Text
+  report_file_url String?
+  created_at     DateTime @default(now())
+
+  patient       Patient        @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  doctor        Doctor         @relation(fields: [doctor_id], references: [id], onDelete: Cascade)
+  appointment   Appointment?   @relation(fields: [appointment_id], references: [id], onDelete: SetNull)
+  prescriptions Prescription[]
+
+  @@map("medical_records")
+}
+
+// ------------------------------------------------------------
+// 6. Prescription Entity
+// ------------------------------------------------------------
+model Prescription {
+  id            String   @id @default(uuid()) @db.Uuid
+  record_id     String   @db.Uuid
+  medicine_name String
+  dosage        String
+  duration      String
+  created_at    DateTime @default(now())
+
+  medical_record MedicalRecord @relation(fields: [record_id], references: [id], onDelete: Cascade)
+
+  @@map("prescriptions")
+}
