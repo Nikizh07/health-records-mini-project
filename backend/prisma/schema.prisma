@@ -26,6 +26,13 @@ enum Role {
   ADMIN
 }
 
+enum InteractionSeverity {
+  MINOR
+  MODERATE
+  MAJOR
+  CRITICAL
+}
+
 // ------------------------------------------------------------
 // 0. User Entity (Authentication & Role Mapping)
 // ------------------------------------------------------------
@@ -56,9 +63,10 @@ model Patient {
   language_pref String
   created_at    DateTime @default(now())
 
-  user            User?           @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  appointments    Appointment[]
-  medical_records MedicalRecord[]
+  user               User?              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  appointments       Appointment[]
+  medical_records    MedicalRecord[]
+  interaction_checks InteractionCheck[]
 
   @@map("patients")
 }
@@ -93,10 +101,11 @@ model Doctor {
   phone          String   @unique
   created_at     DateTime @default(now())
 
-  user            User?           @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  clinic          Clinic          @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
-  appointments    Appointment[]
-  medical_records MedicalRecord[]
+  user               User?              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  clinic             Clinic             @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  appointments       Appointment[]
+  medical_records    MedicalRecord[]
+  interaction_checks InteractionCheck[]
 
   @@map("doctors")
 }
@@ -125,21 +134,23 @@ model Appointment {
 // 5. Medical Record Entity
 // ------------------------------------------------------------
 model MedicalRecord {
-  id             String   @id @default(uuid()) @db.Uuid
-  patient_id     String   @db.Uuid
-  doctor_id      String   @db.Uuid
-  appointment_id String?  @db.Uuid
-  visit_date     DateTime
-  diagnosis      String   @db.Text
-  notes          String   @db.Text
+  id              String   @id @default(uuid()) @db.Uuid
+  patient_id      String   @db.Uuid
+  doctor_id       String   @db.Uuid
+  appointment_id  String?  @db.Uuid
+  visit_date      DateTime
+  diagnosis       String   @db.Text
+  notes           String   @db.Text
   report_file_url String?
-  created_at     DateTime @default(now())
+  created_at      DateTime @default(now())
 
-  patient       Patient        @relation(fields: [patient_id], references: [id], onDelete: Cascade)
-  doctor        Doctor         @relation(fields: [doctor_id], references: [id], onDelete: Cascade)
-  appointment   Appointment?   @relation(fields: [appointment_id], references: [id], onDelete: SetNull)
-  prescriptions Prescription[]
+  patient            Patient            @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  doctor             Doctor             @relation(fields: [doctor_id], references: [id], onDelete: Cascade)
+  appointment        Appointment?       @relation(fields: [appointment_id], references: [id], onDelete: SetNull)
+  prescriptions      Prescription[]
+  interaction_checks InteractionCheck[]
 
+  @@index([patient_id])
   @@map("medical_records")
 }
 
@@ -156,5 +167,57 @@ model Prescription {
 
   medical_record MedicalRecord @relation(fields: [record_id], references: [id], onDelete: Cascade)
 
+  @@index([record_id])
   @@map("prescriptions")
+}
+
+// ------------------------------------------------------------
+// 7. Drug Interaction Reference (curated, seeded)
+// ------------------------------------------------------------
+// Authoritative list of known dangerous drug pairs. Populated by
+// scripts/seed-drug-interactions.js — never written by the app.
+// Names are stored normalised (lowercase generic, no strength/form),
+// always with drug_a < drug_b so a pair has exactly one row.
+// ------------------------------------------------------------
+model DrugInteraction {
+  id                    String              @id @default(uuid()) @db.Uuid
+  drug_a                String
+  drug_b                String
+  severity              InteractionSeverity
+  mechanism             String              @db.Text
+  suggested_alternative String?
+  created_at            DateTime            @default(now())
+
+  @@unique([drug_a, drug_b])
+  @@index([drug_a])
+  @@index([drug_b])
+  @@map("drug_interactions")
+}
+
+// ------------------------------------------------------------
+// 8. Interaction Check (audit trail)
+// ------------------------------------------------------------
+// One row per pre-flight check run before a visit record is saved.
+// Server-side source of truth for what the doctor was shown, so an
+// override reason can be verified against real conflicts.
+// ------------------------------------------------------------
+model InteractionCheck {
+  id              String   @id @default(uuid()) @db.Uuid
+  patient_id      String   @db.Uuid
+  doctor_id       String   @db.Uuid
+  record_id       String?  @db.Uuid
+  checked_drugs   Json
+  conflicts       Json
+  ai_available    Boolean  @default(false)
+  ai_provider     String?
+  overridden      Boolean  @default(false)
+  override_reason String?  @db.Text
+  created_at      DateTime @default(now())
+
+  patient Patient        @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  doctor  Doctor         @relation(fields: [doctor_id], references: [id], onDelete: Cascade)
+  record  MedicalRecord? @relation(fields: [record_id], references: [id], onDelete: SetNull)
+
+  @@index([patient_id])
+  @@map("interaction_checks")
 }

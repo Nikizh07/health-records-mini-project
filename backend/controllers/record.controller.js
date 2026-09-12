@@ -7,11 +7,13 @@
 // 2. GET   /api/records/patient/:patientId — Comprehensive patient history (cross-clinic visibility)
 // 3. GET   /api/records/:id                — Single record details with prescriptions
 // 4. POST  /api/records/:id/upload         — Upload medical report/document (Multer local disk)
+// 5. POST  /api/records/interaction-check  — Pre-flight cross-clinic drug interaction check
 // ============================================================
 
 'use strict';
 
 const prisma = require('../config/prisma');
+const { checkInteractions } = require('../services/interactionChecker');
 
 // Reusable UUID validator regex (8-4-4-4-12)
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -557,8 +559,109 @@ async function uploadReportFile(req, res, next) {
   }
 }
 
+/**
+ * ------------------------------------------------------------
+ * 5. POST /api/records/interaction-check
+ * ------------------------------------------------------------
+ * Pre-flight check run before a visit record is saved.
+ * - Compares the pending prescriptions against everything the patient is
+ *   still taking, at EVERY clinic in the network.
+ * - Persists the result so createMedicalRecord can verify an override
+ *   reason against conflicts the server actually found, rather than
+ *   trusting whatever the client sends back.
+ * - Never blocks: it reports, the doctor decides.
+ * ------------------------------------------------------------
+ */
+async function checkDrugInteractions(req, res, next) {
+  try {
+    const { patient_id, prescriptions } = req.body || {};
+
+    // ── 1. Validate Patient ──────────────────────────────────
+    if (!patient_id || !UUID_REGEX.test(String(patient_id).trim())) {
+      return res.status(400).json({
+        success: false,
+        error: 'Bad Request',
+        message: 'Field "patient_id" is required and must be a valid UUID.',
+      });
+    }
+
+    const patient = await prisma.patient.findUnique({
+      where: { id: String(patient_id).trim() },
+      select: { id: true },
+    });
+
+    if (!patient) {
+      return res.status(404).json({
+        success: false,
+        error: 'Not Found',
+        message: `Patient with ID "${patient_id}" does not exist.`,
+      });
+    }
+
+    // ── 2. Validate Prescriptions ────────────────────────────
+    if (!Array.isArray(prescriptions)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Bad Request',
+        message: 'Field "prescriptions" is required and must be an array.',
+      });
+    }
+
+    const cleaned = prescriptions
+      .filter((rx) => rx && typeof rx.medicine_name === 'string' && rx.medicine_name.trim())
+      .map((rx) => ({
+        medicine_name: String(rx.medicine_name).trim(),
+        dosage: rx.dosage ? String(rx.dosage).trim() : '',
+        duration: rx.duration ? String(rx.duration).trim() : '',
+      }));
+
+    // ── 3. Identify the requesting doctor (for the audit row) ─
+    const doctor_id = await getAuthenticatedDoctorId(req);
+
+    if (!doctor_id || !UUID_REGEX.test(doctor_id)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Bad Request',
+        message: 'Could not resolve the requesting doctor. Ensure the account is linked to a doctor record.',
+      });
+    }
+
+    // ── 4. Run the check ─────────────────────────────────────
+    const result = await checkInteractions({
+      patientId: patient.id,
+      newPrescriptions: cleaned,
+    });
+
+    // ── 5. Persist the audit row ─────────────────────────────
+    const check = await prisma.interactionCheck.create({
+      data: {
+        patient_id: patient.id,
+        doctor_id,
+        checked_drugs: cleaned,
+        conflicts: result.conflicts,
+        ai_available: result.ai_available,
+        ai_provider: result.ai_provider,
+      },
+      select: { id: true },
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        check_id: check.id,
+        conflicts: result.conflicts,
+        ai_available: result.ai_available,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Drug Interaction Check Error:', error);
+    next(error);
+  }
+}
+
 module.exports = {
   createMedicalRecord,
+  checkDrugInteractions,
   getAuthenticatedDoctorId,
   getPatientMedicalHistory,
   getMedicalRecordById,

@@ -21,7 +21,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Full plan: `AWS_MIGRATION_PLAN.md`.
 - **Status: plan only. No code changes made yet.**
 
-## Planned: AI cross-clinic medication conflict detector
+## In progress: AI cross-clinic medication conflict detector
 - **Decision (2026-09-12):** warn a doctor at save time when a new prescription conflicts with a drug another clinic already started. Full plan: `AI_DRUG_INTERACTION_PLAN.md`.
 - Two knowledge sources: a seeded `drug_interactions` reference table (deterministic, always runs) **plus** an LLM leg.
 - **The AI provider is pluggable, configured by env vars only** (2026-09-12). One adapter contract (`isConfigured()` + `complete({system,user})`) with three implementations: `openai-compatible` (plain `fetch`, no deps — covers OpenAI, Gemini's compat endpoint, Groq, OpenRouter, Ollama, vLLM, any custom URL), `bedrock`, and `sagemaker`. Adding a provider = one file + one registry line. AWS SDKs are `optionalDependencies`, lazily required.
@@ -29,7 +29,10 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Bedrock model ids are region-specific: get the exact id from `aws bedrock list-foundation-models --region ap-south-1 --by-provider meta`, never guess. SageMaker has no standard payload shape — the adapter targets HuggingFace TGI and the mapping is meant to be edited.
 - **Fails open by design**: if Bedrock is unreachable the save still proceeds, flagged `ai_available: false`, and the curated table still fires. Never block a clinic on an LLM outage.
 - Conflicts warn but don't block; the doctor must give an override reason, and every check is stored in `interaction_checks` for audit.
-- **Status: plan only. No code changes made yet.**
+- **Status (2026-09-12): Phase 1 done** — schema (`drug_interactions`, `interaction_checks`, `InteractionSeverity`) + 2 migrations, `utils/drugName.js`, `utils/prescriptionWindow.js`, `services/interactionChecker.js`, `scripts/seed-drug-interactions.js` (56 curated pairs), and `POST /api/records/interaction-check`. Verified end to end against the local DB and over HTTP with a real doctor token; test rows cleaned up. Phases 2-4 (audit wiring, Flutter UI, AI layer) pending.
+- Gotcha: `utils/drugName.js` `normaliseDrugName()` is the contract between the seeder and the checker. If one side changes how names are normalised and the other doesn't, lookups silently return nothing — there is no error.
+- Gotcha: an unparseable `duration` makes a prescription count as active for 90 days (`ASSUMED_ACTIVE_DAYS`) and marks the conflict `confidence: "ASSUMED"`. Deliberate: a false warning is cheaper than a missed one.
+- Known gap: the checker compares new drugs only against *existing* active ones, so two conflicting drugs prescribed in the **same visit** do not fire. Left open deliberately (outside the approved Phase 1 scope); closing it means including the new drugs on both sides of the pair loop in `findTableConflicts`.
 
 ## Known gotchas
 - `backend/config/firebase.js` falls back to Google ADC when the key file is missing. That will fail on AWS, and the key is dockerignored, so it must be injected as the `FIREBASE_SERVICE_ACCOUNT_JSON` secret.

@@ -8,7 +8,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AI_DRUG_INTERACTION_PLAN.md    # cross-clinic medication conflict detector plan — not implemented yet
+├── AI_DRUG_INTERACTION_PLAN.md    # cross-clinic medication conflict detector — Phase 1 done, 2-4 pending
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
@@ -41,23 +41,31 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── health.routes.js, protected.routes.js
 │   │   ├── patient.routes.js, doctor.routes.js, clinic.routes.js
 │   │   ├── appointment.routes.js
-│   │   └── record.routes.js       # records + POST /:id/upload (multer)
+│   │   └── record.routes.js       # records, POST /interaction-check, POST /:id/upload (multer)
 │   ├── controllers/
 │   │   ├── health.controller.js, patient.controller.js, doctor.controller.js
 │   │   ├── clinic.controller.js, appointment.controller.js
-│   │   └── record.controller.js   # medical records, prescriptions, report upload
+│   │   └── record.controller.js   # medical records, prescriptions, report upload,
+│   │                              # + POST /interaction-check (drug conflict pre-flight)
 │   ├── middleware/
 │   │   ├── authenticate.js        # verifies Firebase ID token → req.user
 │   │   ├── requireRole.js         # role gate (PATIENT / DOCTOR / ADMIN)
 │   │   ├── authorizePatientAccess.js
 │   │   ├── upload.js              # multer local-disk storage, 5 MB, PDF/PNG/JPG/WEBP
 │   │   ├── errorHandler.js, notFound.js
+│   ├── services/
+│   │   └── interactionChecker.js  # cross-clinic drug conflict detector (curated table; AI leg = Phase 4)
 │   ├── prisma/
-│   │   ├── schema.prisma
-│   │   └── migrations/            # 20260810170839_init_schema, 20260910082706
-│   ├── utils/healthId.js          # MWH-XXXXXX health ID generator
+│   │   ├── schema.prisma          # + DrugInteraction, InteractionCheck, InteractionSeverity
+│   │   └── migrations/            # 20260810170839_init_schema, 20260910082706,
+│   │                              # 20260912122022_add_drug_interactions, 20260912122039_add_history_indexes
+│   ├── utils/
+│   │   ├── healthId.js            # MWH-XXXXXX health ID generator
+│   │   ├── drugName.js            # normalises free-text medicine names for table lookup
+│   │   └── prescriptionWindow.js  # infers whether a prescription is still active
 │   ├── scripts/                   # seed-*.js, seed-test-users.sql, set-user-role.js,
-│   │                              # generate-test-token.js, get-test-tokens.js, list-ids.js
+│   │                              # generate-test-token.js, get-test-tokens.js, list-ids.js,
+│   │                              # seed-drug-interactions.js (56 curated pairs)
 │   ├── postman/                   # API collection + environment
 │   ├── models/README.md
 │   └── uploads/reports/           # local uploaded reports (1 test PDF)

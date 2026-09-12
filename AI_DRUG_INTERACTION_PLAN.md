@@ -1,7 +1,7 @@
 # Plan: AI Cross-Clinic Medication Conflict Detector
 
-**Status: plan only — no code written.** Approved 2026-09-12; Phase 4 revised 2026-09-12 to be
-provider-agnostic.
+**Status: Phase 1 complete (2026-09-12). Phases 2-4 pending.**
+Approved 2026-09-12; Phase 4 revised the same day to be provider-agnostic.
 
 ## Context
 
@@ -71,14 +71,14 @@ feature, and Phase 4 can slip without stranding half-built work.
 
 | Phase | Scope | Depends on | External deps |
 |---|---|---|---|
-| 1 | Schema + deterministic checker + check endpoint | — | none |
+| 1 | ✅ **Done** — schema + deterministic checker + check endpoint | — | none |
 | 2 | Audit wiring into record creation | 1 | none |
 | 3 | Flutter banner + override UI + tests | 2 | none |
 | 4 | Pluggable AI layer + prompt file | 1 | one AI endpoint (any) |
 
 ---
 
-## Phase 1 — Deterministic core (backend, no AI)
+## Phase 1 — Deterministic core (backend, no AI) ✅ DONE
 
 Goal: `POST /api/records/interaction-check` returns real cross-clinic conflicts from the curated table.
 
@@ -221,10 +221,31 @@ already commented in `patient.routes.js` and `appointment.routes.js`.
 Follow the file's conventions: validation errors returned inline (never thrown), unexpected errors to
 `next(error)`, `'use strict'`, numbered `// ── n. ──` step comments.
 
-> **Done when:** seed the table, give a test patient a warfarin record, then POST ibuprofen to
-> `/api/records/interaction-check` via the Postman collection (`backend/postman/`) → a CRITICAL conflict
-> comes back naming the other clinic and date, with `ai_available: false`, and an `interaction_checks`
-> row exists.
+### Phase 1 outcome (2026-09-12)
+
+Shipped, and verified against the local database and over HTTP with a real doctor token:
+
+| File | Notes |
+|---|---|
+| `prisma/schema.prisma` | `DrugInteraction`, `InteractionCheck`, `InteractionSeverity` |
+| `prisma/migrations/20260912122022_add_drug_interactions/` | tables, enum, FKs, unique pair index |
+| `prisma/migrations/20260912122039_add_history_indexes/` | `medical_records.patient_id`, `prescriptions.record_id` |
+| `utils/drugName.js` | **not in the original plan** — normalisation was pulled out of the checker into a shared util because the seeder must use the identical function, or table lookups silently miss |
+| `utils/prescriptionWindow.js` | `parseDurationDays` also handles UK shorthand (`3/52`) |
+| `services/interactionChecker.js` | AI seam marked for Phase 4 |
+| `scripts/seed-drug-interactions.js` | 56 curated pairs, idempotent via upsert |
+| `controllers/record.controller.js` | `checkDrugInteractions` handler |
+| `routes/record.routes.js` | `POST /api/records/interaction-check`, declared above the `/:id` routes |
+
+Checks that passed: cross-clinic CRITICAL conflict naming the source clinic and date; an expired course
+correctly ignored; a safe drug returning nothing; CRITICAL sorted above MAJOR; empty prescription list
+handled; 400s on bad `patient_id` and missing `prescriptions`; 401 without a token; audit row written.
+All test rows were removed afterwards.
+
+**Known gap, deliberately not filled:** the checker compares new drugs only against *existing* active
+ones. Two conflicting drugs prescribed in the *same* visit do not fire. Closing it means including the
+new drugs on both sides of the candidate-pair loop in `findTableConflicts` — a few lines — but it was
+outside the approved scope, so it is left as a decision for Phase 2 or later.
 
 ---
 
