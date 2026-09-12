@@ -1,6 +1,6 @@
 # Plan: AI Cross-Clinic Medication Conflict Detector
 
-**Status: Phases 1-2 complete (2026-09-12). Phases 3-4 pending.**
+**Status: Phases 1-2 complete, plus the same-visit gap closed (2026-09-12). Phases 3-4 pending.**
 Approved 2026-09-12; Phase 4 revised the same day to be provider-agnostic.
 
 ## Context
@@ -189,9 +189,20 @@ Conflict object returned to the client:
   "explanation": "Ibuprofen increases bleeding risk when combined with Warfarin.",
   "suggested_alternative": "Acetaminophen",
   "source": "TABLE",
-  "confidence": "CERTAIN"
+  "confidence": "CERTAIN",
+  "scope": "EXISTING"
 }
 ```
+
+`scope` says which leg found the pair, and the client must branch on it:
+
+| `scope` | Meaning | `clinic_name` / `prescribed_on` |
+|---|---|---|
+| `EXISTING` | A new drug against something the patient is already taking, at any clinic | populated |
+| `SAME_VISIT` | Two drugs in *this* prescription conflicting with each other | **both `null`** — neither has been dispensed, so there is nothing to attribute |
+
+A drug pair is reported once. Where the patient is already on one of two new drugs, the richer
+`EXISTING` conflict wins, so the clinic and date are never lost to a same-visit duplicate.
 
 At this phase `explanation` comes from the table's `mechanism` column.
 
@@ -242,10 +253,54 @@ correctly ignored; a safe drug returning nothing; CRITICAL sorted above MAJOR; e
 handled; 400s on bad `patient_id` and missing `prescriptions`; 401 without a token; audit row written.
 All test rows were removed afterwards.
 
-**Known gap, deliberately not filled:** the checker compares new drugs only against *existing* active
-ones. Two conflicting drugs prescribed in the *same* visit do not fire. Closing it means including the
-new drugs on both sides of the candidate-pair loop in `findTableConflicts` — a few lines — but it was
-outside the approved scope, so it is left as a decision for Phase 2 or later.
+**Known gap at the time: closed 2026-09-12** (see *Same-visit conflicts* below). The checker originally
+compared new drugs only against *existing* active ones, so two conflicting drugs prescribed in the same
+visit did not fire.
+
+---
+
+## Same-visit conflicts ✅ DONE (2026-09-12)
+
+Closed the gap Phase 1 left open, **before** the Phase 3 banner was built rather than after, because the
+conflict object the banner renders changes shape: a same-visit conflict has no source clinic or date.
+Retrofitting it later would have meant rebuilding the banner.
+
+It also mattered on its own. A walk-in doctor writing a fresh prescription set — warfarin *and*
+ibuprofen in one visit — got a clean result on a CRITICAL interaction. Once a banner exists and doctors
+trust it, a silent miss on the case entirely within one doctor's control is worse than no banner.
+
+In `services/interactionChecker.js`, `findTableConflicts` now runs two legs:
+
+1. each new drug against the patient's active medications (`scope: 'EXISTING'`, as before);
+2. each pair *within* the new prescription list (`scope: 'SAME_VISIT'`, `clinic_name` and
+   `prescribed_on` both `null`, `confidence: 'CERTAIN'` — nothing is being assumed about a past course).
+
+The load-bearing change is the removal of an early return: the function used to bail out when the
+patient had no active medications, which is exactly the case where a same-visit pair is the *only*
+thing that can fire. The candidate-pair query gained a third `OR` clause for new-against-new.
+
+Deduplication moved from a directional key (`new|existing`) to the **ordered** pair, so one interaction
+is reported once however it is reached. The existing leg runs first, so where both legs find the same
+pair the `EXISTING` conflict — which names a clinic and a date — is the one kept.
+
+Phase 2 needs no change: a same-visit conflict is stored in the check row like any other and demands an
+`override_reason` through the same path.
+
+**Verified** by `scripts/test-interactions.js` (see below): 80 assertions, including that the pair fires
+with no history at all, is reported once regardless of drug order, that three new drugs yield all three
+pairs, that a drug never conflicts with itself, and that the cross-clinic behaviour is unchanged.
+
+### Regression suite — `scripts/test-interactions.js` (new)
+
+Runs the whole feature against a real database over real HTTP, so `authenticate`, `requireRole`, the
+controller and the error handler all execute. Firebase is stubbed in `require.cache` before the app
+loads, so **no service account, no device and no app build are needed**:
+
+```bash
+cd backend && DATABASE_URL=postgresql://... node scripts/test-interactions.js
+```
+
+It creates its own timestamped fixtures and deletes them at the end. Point it at a development database.
 
 ---
 
@@ -344,8 +399,10 @@ Rework `_submitRecord` — insert between building `formattedPrescriptions` and 
 New `_InteractionBanner` widget rendered just above the submit button. Follow the file's own conventions —
 hardcoded English (this screen is entirely unlocalised) and the `Colors.red.shade50 / shade200 / shade700`
 box pattern from `book_appointment_screen.dart:683-704`, with severity-coloured chips reusing the
-`_DoctorAppointmentCard` status-chip style. Per conflict show: new drug, existing drug, **clinic name and
-date**, explanation, suggested alternative. When `_aiUnavailable`, show a muted amber note
+`_DoctorAppointmentCard` status-chip style. Per conflict show: new drug, existing drug, explanation,
+suggested alternative, and **branch on `scope`** — an `EXISTING` conflict names the clinic and date
+("Clinic A, 15 Jan"), while a `SAME_VISIT` one has neither and must be phrased as both drugs being in
+this prescription. Rendering a `SAME_VISIT` conflict with the `EXISTING` layout prints a null clinic. When `_aiUnavailable`, show a muted amber note
 ("AI check unavailable — showing known interactions only") rather than a green all-clear.
 
 ### 3.3 Tests — `test/clinic_flow_test.dart`

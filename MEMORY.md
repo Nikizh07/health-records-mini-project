@@ -45,6 +45,13 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-12: Same-visit drug conflicts now fire.** `findTableConflicts` (`backend/services/interactionChecker.js`) checks pairs *within* the new prescription list as well as new-vs-active.
+  - The gap: the function returned early when the patient had no active medications — exactly the case where a same-visit pair is the only thing that can fire. Warfarin + ibuprofen written together in one visit produced a clean result on a CRITICAL interaction.
+  - Fixed **before** Phase 3 on purpose: a same-visit conflict has no source clinic or date, so the conflict object the banner renders changes shape. Building the banner first would have meant rebuilding it.
+  - Conflicts now carry **`scope`**: `'EXISTING'` (names `clinic_name` + `prescribed_on`) or `'SAME_VISIT'` (**both `null`**, `confidence: 'CERTAIN'`). **Phase 3's banner must branch on this** or it will render a null clinic.
+  - Dedupe moved from a directional key to the ordered pair, so an interaction is reported once however it is reached. The existing leg runs first, so where both legs hit the same pair the richer `EXISTING` conflict wins and the clinic is never lost.
+  - Phase 2 needed no change — a same-visit conflict demands an `override_reason` through the same path.
+  - New `backend/scripts/test-interactions.js`: 80 assertions over real HTTP, Firebase stubbed in `require.cache`, self-cleaning fixtures. Run it with `DATABASE_URL=... node scripts/test-interactions.js`.
 - **2026-09-12: Drug interaction Phase 2 — audit wiring.** `createMedicalRecord` now accepts optional `check_id` and `override_reason` (`backend/controllers/record.controller.js`).
   - With a `check_id`, the conflicts are re-read from the stored `interaction_checks` row, never from the request body. If that row recorded conflicts, a non-empty `override_reason` is required or the save is refused with 400.
   - After the record is written, the check row is linked back: `record_id`, `overridden`, `override_reason`.

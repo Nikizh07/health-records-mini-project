@@ -64,7 +64,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── drugName.js            # normalises free-text medicine names for table lookup
 │   │   └── prescriptionWindow.js  # infers whether a prescription is still active
 │   ├── scripts/                   # seed-*.js, seed-test-users.sql, set-user-role.js,
-│   │                              # generate-test-token.js, get-test-tokens.js, list-ids.js,
+│   │                              # generate-test-token.js, get-test-tokens.js, list-ids.js
+│   │   └── test-interactions.js   # drug-interaction regression suite (real HTTP, Firebase stubbed),
 │   │                              # seed-drug-interactions.js (56 curated pairs)
 │   ├── postman/                   # API collection + environment
 │   ├── models/README.md

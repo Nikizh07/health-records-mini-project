@@ -81,6 +81,16 @@ async function getActiveMedications(patientId) {
  * Deterministic leg: looks the candidate pairs up in the curated table.
  * One query, matched in memory.
  *
+ * Two kinds of pair are checked:
+ *   - EXISTING   — a new drug against something the patient is already on,
+ *                  at any clinic. Carries that clinic's name and date.
+ *   - SAME_VISIT — two drugs in THIS prescription conflicting with each
+ *                  other. Neither has been dispensed yet, so there is no
+ *                  source clinic or date to report.
+ *
+ * A drug pair is reported once, whichever leg finds it first, so a patient
+ * already on both drugs does not produce the same warning twice.
+ *
  * @param {Array<{raw: string, name: string}>} newDrugs
  * @param {Array} activeMeds - from getActiveMedications
  * @returns {Promise<Array<object>>} conflict objects
@@ -89,13 +99,17 @@ async function findTableConflicts(newDrugs, activeMeds) {
   const newNames = [...new Set(newDrugs.map((d) => d.name))];
   const activeNames = [...new Set(activeMeds.map((m) => m.name))];
 
-  if (newNames.length === 0 || activeNames.length === 0) return [];
+  // Note: no early return on an empty activeNames. A patient on nothing at
+  // all can still be handed two drugs that conflict with each other.
+  if (newNames.length === 0) return [];
 
   const rows = await prisma.drugInteraction.findMany({
     where: {
       OR: [
         { drug_a: { in: newNames }, drug_b: { in: activeNames } },
         { drug_a: { in: activeNames }, drug_b: { in: newNames } },
+        // Both sides new — the same-visit case.
+        { drug_a: { in: newNames }, drug_b: { in: newNames } },
       ],
     },
   });
@@ -111,8 +125,11 @@ async function findTableConflicts(newDrugs, activeMeds) {
 
   const byPair = new Map(rows.map((r) => [`${r.drug_a}|${r.drug_b}`, r]));
   const conflicts = [];
-  const seen = new Set();
+  // Keyed by the ordered pair, so one interaction is reported once no matter
+  // which leg or which drug ordering reaches it.
+  const seenPairs = new Set();
 
+  // ── a. A new drug vs something the patient is already taking ─
   for (const newDrug of newDrugs) {
     for (const existingName of latestActive.keys()) {
       // A drug does not conflict with itself; a duplicate prescription is a
@@ -120,12 +137,10 @@ async function findTableConflicts(newDrugs, activeMeds) {
       if (newDrug.name === existingName) continue;
 
       const [a, b] = orderPair(newDrug.name, existingName);
-      const row = byPair.get(`${a}|${b}`);
-      if (!row) continue;
-
-      const key = `${newDrug.name}|${existingName}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      const key = `${a}|${b}`;
+      const row = byPair.get(key);
+      if (!row || seenPairs.has(key)) continue;
+      seenPairs.add(key);
 
       const existing = latestActive.get(existingName);
 
@@ -139,6 +154,41 @@ async function findTableConflicts(newDrugs, activeMeds) {
         suggested_alternative: row.suggested_alternative,
         source: 'TABLE',
         confidence: existing.confidence,
+        scope: 'EXISTING',
+      });
+    }
+  }
+
+  // ── b. Two drugs in THIS prescription, against each other ────
+  // Runs second so that when the patient is already on one of the pair, the
+  // richer EXISTING conflict (it names a clinic and a date) is the one kept.
+  for (let i = 0; i < newDrugs.length; i++) {
+    for (let j = i + 1; j < newDrugs.length; j++) {
+      const first = newDrugs[i];
+      const second = newDrugs[j];
+      if (first.name === second.name) continue;
+
+      const [a, b] = orderPair(first.name, second.name);
+      const key = `${a}|${b}`;
+      const row = byPair.get(key);
+      if (!row || seenPairs.has(key)) continue;
+      seenPairs.add(key);
+
+      conflicts.push({
+        new_drug: first.raw,
+        existing_drug: second.raw,
+        severity: row.severity,
+        // Neither drug has been dispensed, so there is no prescribing clinic
+        // or date to point at — `scope` tells the client to say so.
+        clinic_name: null,
+        prescribed_on: null,
+        explanation: row.mechanism,
+        suggested_alternative: row.suggested_alternative,
+        source: 'TABLE',
+        // Both drugs are being written right now; nothing is being assumed
+        // about whether a past course is still running.
+        confidence: 'CERTAIN',
+        scope: 'SAME_VISIT',
       });
     }
   }
