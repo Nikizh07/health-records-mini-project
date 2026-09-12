@@ -607,7 +607,11 @@ Run at the end, once all four phases are in:
 
 ## Docs to update (per `CLAUDE.md`)
 
-- `SNAPSHOT.md` — after Phase 1 add `services/interactionChecker.js`, `utils/prescriptionWindow.js`,
-  `scripts/seed-drug-interactions.js`, migration #3; after Phase 4 add the `prompts/` and `services/ai/`
-  trees and `scripts/test-ai-provider.js`.
-- `MEMORY.md` — a dated note per phase as it lands, replacing the "plan only" status.
+- ✅ `SNAPSHOT.md` — Phase 1 entries added (`services/interactionChecker.js`, `utils/drugName.js`,
+  `utils/prescriptionWindow.js`, `scripts/seed-drug-interactions.js`, both new migrations), plus
+  `scripts/test-interactions.js`. Still to add after Phase 4: the `prompts/` and `services/ai/` trees
+  and `scripts/test-ai-provider.js`.
+- ✅ `MEMORY.md` — dated notes recorded for Phase 1, Phase 2 and the same-visit fix.
+- Phase 3 will add no backend files, but `SNAPSHOT.md` should gain the Flutter banner widget and the
+  new `record_service.dart` method, and `MEMORY.md` a note that the feature is finally reachable by a
+  doctor — until then Phases 1-2 are enforced by the API but nothing in the app sends a `check_id`.

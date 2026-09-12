@@ -10,11 +10,11 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - **Auth**: Firebase Auth on the client. The backend verifies Firebase ID tokens with `firebase-admin` (`middleware/authenticate.js`). Roles are PATIENT / DOCTOR / ADMIN (`middleware/requireRole.js`).
 - **Patients** get a health ID in the form `MWH-XXXXXX` (`utils/healthId.js`). Medical history is visible across clinics by design.
 
-## Current infrastructure (as of 2026-09-11)
+## Current infrastructure (as of 2026-09-12)
 - Branded as GCP (Cloud Run / Cloud SQL / GCS), but the code is barely tied to GCP:
   - DB is plain Postgres via `DATABASE_URL`, with no Cloud SQL connector.
   - GCS was **never implemented**. Reports are saved to local disk (`backend/uploads/reports/`) and served from `/uploads`.
-  - CI (`.github/workflows/deploy-container.yml`) only pushes the image to GHCR. Nothing auto-deploys.
+  - CI: `.github/workflows/build-apk.yml` builds an Android APK on every push to `main` touching `mobile_app/**`. The backend image workflow is the file `.github/workflows/deploy-container` — **no `.yml` extension, so Actions has never run it**. Nothing auto-deploys either way.
 
 ## In progress: AWS migration
 - **Decision (2026-09-11):** move the DB → RDS Postgres, storage → private S3 with presigned URLs, and the backend → ECS Fargate. **Keep Firebase exactly as is.**

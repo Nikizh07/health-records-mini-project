@@ -1,6 +1,6 @@
 # Folder Snapshot
 
-Snapshot of the project layout as of 2026-09-11. It leaves out generated/build output (`node_modules/`, `.dart_tool/`, `build/`, `.gradle/`, lockfiles, `ephemeral/`).
+Snapshot of the project layout as of 2026-09-12. It leaves out generated/build output (`node_modules/`, `.dart_tool/`, `build/`, `.gradle/`, lockfiles, `ephemeral/`).
 Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed to one line each.
 
 **Keep this file current:** when files or folders are added, moved or deleted, update the tree below.
@@ -46,7 +46,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── health.controller.js, patient.controller.js, doctor.controller.js
 │   │   ├── clinic.controller.js, appointment.controller.js
 │   │   └── record.controller.js   # medical records, prescriptions, report upload,
-│   │                              # + POST /interaction-check (drug conflict pre-flight)
+│   │                              # POST /interaction-check (drug conflict pre-flight), and
+│   │                              # createMedicalRecord's check_id / override_reason audit wiring
 │   ├── middleware/
 │   │   ├── authenticate.js        # verifies Firebase ID token → req.user
 │   │   ├── requireRole.js         # role gate (PATIENT / DOCTOR / ADMIN)
@@ -54,7 +55,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── upload.js              # multer local-disk storage, 5 MB, PDF/PNG/JPG/WEBP
 │   │   ├── errorHandler.js, notFound.js
 │   ├── services/
-│   │   └── interactionChecker.js  # cross-clinic drug conflict detector (curated table; AI leg = Phase 4)
+│   │   └── interactionChecker.js  # drug conflict detector: new-vs-active (cross-clinic) AND
+│   │                              # new-vs-new in the same visit; curated table, AI leg = Phase 4
 │   ├── prisma/
 │   │   ├── schema.prisma          # + DrugInteraction, InteractionCheck, InteractionSeverity
 │   │   └── migrations/            # 20260810170839_init_schema, 20260910082706,
@@ -64,9 +66,10 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── drugName.js            # normalises free-text medicine names for table lookup
 │   │   └── prescriptionWindow.js  # infers whether a prescription is still active
 │   ├── scripts/                   # seed-*.js, seed-test-users.sql, set-user-role.js,
-│   │                              # generate-test-token.js, get-test-tokens.js, list-ids.js
-│   │   └── test-interactions.js   # drug-interaction regression suite (real HTTP, Firebase stubbed),
-│   │                              # seed-drug-interactions.js (56 curated pairs)
+│   │   │                          # generate-test-token.js, get-test-tokens.js, list-ids.js
+│   │   ├── seed-drug-interactions.js  # 56 curated interaction pairs (idempotent upsert)
+│   │   └── test-interactions.js   # drug-interaction regression suite: 80 assertions over real
+│   │                              # HTTP, Firebase stubbed — needs no device or service account
 │   ├── postman/                   # API collection + environment
 │   ├── models/README.md
 │   └── uploads/reports/           # local uploaded reports (1 test PDF)
@@ -99,7 +102,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   ├── presentation/
     │   │   ├── screens/
     │   │   │   ├── auth/          # login, otp_verification, patient_registration
-    │   │   │   ├── dashboard/     # dashboard_screen + widgets/dashboard_header_card
+    │   │   │   ├── dashboard/     # dashboard_screen (+ chatbot placeholder) + widgets/dashboard_header_card
     │   │   │   ├── appointments/  # appointments_screen, book_appointment_screen
     │   │   │   ├── records/       # records_screen, record_detail_screen (opens report URL)
     │   │   │   ├── clinic/clinic_shell.dart   # wraps signed-in routes: auth wait, role gate, staff side nav on wide screens
