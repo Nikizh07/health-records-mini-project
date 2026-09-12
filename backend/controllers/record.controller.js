@@ -130,6 +130,8 @@ async function createMedicalRecord(req, res, next) {
       diagnosis,
       notes,
       prescriptions,
+      check_id,
+      override_reason,
     } = body;
 
     // ── 1. Validate Doctor Identity ──────────────────────────
@@ -290,7 +292,76 @@ async function createMedicalRecord(req, res, next) {
       }
     }
 
-    // ── 6. Atomic Record + Prescriptions Creation ────────────
+    // ── 6. Validate the Pre-Flight Interaction Check ─────────
+    // The conflicts are read back from the stored check row, never from the
+    // request body, so the audit trail reflects what the server actually found
+    // and a client cannot save a conflicted record by simply omitting them.
+    let interactionCheck = null;
+    let cleanOverrideReason = null;
+
+    if (check_id) {
+      const cleanCheckId = String(check_id).trim();
+
+      if (!UUID_REGEX.test(cleanCheckId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bad Request',
+          message: 'Field "check_id" must be a valid UUID if provided.',
+        });
+      }
+
+      interactionCheck = await prisma.interactionCheck.findUnique({
+        where: { id: cleanCheckId },
+        select: { id: true, patient_id: true, conflicts: true, record_id: true },
+      });
+
+      if (!interactionCheck) {
+        return res.status(404).json({
+          success: false,
+          error: 'Not Found',
+          message: `Interaction check with ID "${check_id}" was not found.`,
+        });
+      }
+
+      if (interactionCheck.patient_id !== patient.id) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bad Request',
+          message: 'The specified interaction check does not belong to this patient.',
+        });
+      }
+
+      // A check row maps to exactly one record, or the audit trail loses track
+      // of which save the doctor was warned about.
+      if (interactionCheck.record_id) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bad Request',
+          message: 'This interaction check has already been linked to a medical record. Run a new check.',
+        });
+      }
+
+      const storedConflicts = Array.isArray(interactionCheck.conflicts)
+        ? interactionCheck.conflicts
+        : [];
+
+      const hasReason =
+        typeof override_reason === 'string' && override_reason.trim().length > 0;
+
+      if (storedConflicts.length > 0 && !hasReason) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bad Request',
+          message: `This check found ${storedConflicts.length} drug interaction(s). Field "override_reason" is required to save the record anyway.`,
+        });
+      }
+
+      if (hasReason) {
+        cleanOverrideReason = override_reason.trim();
+      }
+    }
+
+    // ── 7. Atomic Record + Prescriptions Creation ────────────
     const parsedVisitDate = visit_date && !isNaN(Date.parse(visit_date))
       ? new Date(visit_date)
       : new Date();
@@ -320,6 +391,23 @@ async function createMedicalRecord(req, res, next) {
         where: { id: validAppointmentId },
         data: { status: 'completed' },
       }).catch((err) => console.warn('Could not auto-complete appointment:', err.message));
+    }
+
+    // Link the pre-flight check to the record it authorised. `overridden` is
+    // only true when the doctor saved past real conflicts — a clean check that
+    // warned about nothing was not overridden.
+    if (interactionCheck) {
+      const hadConflicts =
+        Array.isArray(interactionCheck.conflicts) && interactionCheck.conflicts.length > 0;
+
+      await prisma.interactionCheck.update({
+        where: { id: interactionCheck.id },
+        data: {
+          record_id: newRecord.id,
+          overridden: hadConflicts,
+          override_reason: cleanOverrideReason,
+        },
+      }).catch((err) => console.warn('Could not link interaction check to record:', err.message));
     }
 
     return res.status(201).json({

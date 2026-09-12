@@ -1,6 +1,6 @@
 # Plan: AI Cross-Clinic Medication Conflict Detector
 
-**Status: Phase 1 complete (2026-09-12). Phases 2-4 pending.**
+**Status: Phases 1-2 complete (2026-09-12). Phases 3-4 pending.**
 Approved 2026-09-12; Phase 4 revised the same day to be provider-agnostic.
 
 ## Context
@@ -72,7 +72,7 @@ feature, and Phase 4 can slip without stranding half-built work.
 | Phase | Scope | Depends on | External deps |
 |---|---|---|---|
 | 1 | ✅ **Done** — schema + deterministic checker + check endpoint | — | none |
-| 2 | Audit wiring into record creation | 1 | none |
+| 2 | ✅ **Done** — audit wiring into record creation | 1 | none |
 | 3 | Flutter banner + override UI + tests | 2 | none |
 | 4 | Pluggable AI layer + prompt file | 1 | one AI endpoint (any) |
 
@@ -249,7 +249,7 @@ outside the approved scope, so it is left as a decision for Phase 2 or later.
 
 ---
 
-## Phase 2 — Audit wiring (backend)
+## Phase 2 — Audit wiring (backend) ✅ DONE
 
 Goal: saving a record can be linked to a check, and a conflicted save demands a reason.
 
@@ -266,6 +266,41 @@ Modify `createMedicalRecord` to accept optional `check_id` and `override_reason`
 > **Done when:** via Postman, a `POST /api/records` carrying a `check_id` that had conflicts is rejected
 > with 400 until an `override_reason` is supplied; once saved, the `interaction_checks` row has
 > `record_id` set, `overridden = true`, and the reason stored.
+
+### Phase 2 outcome (2026-09-12)
+
+Shipped in `controllers/record.controller.js` only — no new files, no schema change, no new route
+(`POST /api/records` already existed). Three edits: `check_id` / `override_reason` accepted off the body,
+a new step 6 that validates the check before the record is written, and a link-back write after it.
+
+Conflicts are re-read from the stored `interaction_checks` row, never from the request body, so a client
+cannot save a conflicted record by omitting them.
+
+Two decisions that refine the plan:
+
+- **`overridden` is set to `true` only when the stored check actually recorded conflicts.** Writing
+  `true` unconditionally, as the plan's wording implied, would mark clean checks as overridden and make
+  the audit trail claim a doctor dismissed a warning that was never shown.
+- **A check row is single-use.** Saving a second record against a check that already has a `record_id`
+  is refused with 400, otherwise the audit trail cannot say which save the doctor was warned about.
+  Not in the original plan; added because it is cheap and the row is the audit record.
+
+The link-back update follows the file's existing post-create convention (`.catch` + warn, as with the
+appointment auto-complete): the record is already committed at that point, so a failed audit write is
+logged rather than turned into a misleading 500.
+
+Verified against a real PostgreSQL 16 database by driving the real controller (25 assertions, all
+passing, fixtures removed afterwards): cross-clinic CRITICAL conflict detected; conflicted save refused
+with 400 naming `override_reason`; whitespace-only reason also refused; no record written on refusal;
+with a reason the save returns 201 and the check row carries `record_id`, `overridden = true` and the
+trimmed reason; a consumed check refused on reuse; a check belonging to a different patient refused;
+a clean check saves with no reason and stores `overridden = false`; malformed `check_id` → 400 and
+unknown `check_id` → 404, each for the right reason; and with no `check_id` at all the endpoint behaves
+exactly as before. The server boots and both routes still gate unauthenticated callers at 401.
+
+**Not covered:** no test over real HTTP with a Firebase token — the assertions drive the controller
+directly. The route and its middleware were unchanged by this phase, so only the auth gate was smoke
+tested.
 
 ---
 

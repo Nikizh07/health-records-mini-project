@@ -45,6 +45,14 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-12: Drug interaction Phase 2 — audit wiring.** `createMedicalRecord` now accepts optional `check_id` and `override_reason` (`backend/controllers/record.controller.js`).
+  - With a `check_id`, the conflicts are re-read from the stored `interaction_checks` row, never from the request body. If that row recorded conflicts, a non-empty `override_reason` is required or the save is refused with 400.
+  - After the record is written, the check row is linked back: `record_id`, `overridden`, `override_reason`.
+  - `overridden` is true **only when conflicts were actually found** — a clean check saves with no reason and stores `overridden = false`, so the audit trail never claims a warning was dismissed when none was shown.
+  - A check row is **single-use**: reusing one that already has a `record_id` is a 400. Not in the plan; added so the audit trail can say which save the doctor was warned about.
+  - Omitting `check_id` leaves the endpoint behaving exactly as before, so the current app build and the Postman collection keep working until Phase 3 lands.
+  - Verified with 25 assertions against a real Postgres 16 DB driving the real controller; fixtures cleaned up. No HTTP-level test with a Firebase token — the route and middleware were unchanged.
+  - Next: Phase 3 (Flutter banner + override UI), then Phase 4 (the AI layer).
 - **2026-09-11: APK build pipeline.** `.github/workflows/build-apk.yml` builds an installable Android APK on every push to `main` that touches `mobile_app/**` (plus manual `workflow_dispatch`).
   - Two jobs: `test` (`flutter analyze` + `flutter test`) and `build`. They run in parallel, so a failing test is visible but never blocks the APK.
   - The build mode is chosen from the API URL, because `AppConstants.validateNetworkSecurity()` makes a release build throw at launch on a non-HTTPS endpoint:
