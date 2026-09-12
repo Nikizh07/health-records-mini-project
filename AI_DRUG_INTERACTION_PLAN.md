@@ -1,6 +1,7 @@
 # Plan: AI Cross-Clinic Medication Conflict Detector
 
-**Status: plan only — no code written.** Approved 2026-09-12.
+**Status: plan only — no code written.** Approved 2026-09-12; Phase 4 revised 2026-09-12 to be
+provider-agnostic.
 
 ## Context
 
@@ -16,15 +17,17 @@ patient's still-active prescriptions from *every* clinic, and returns any danger
 the culprit drug, the clinic that prescribed it, and the date. The doctor sees a red banner and must
 give an override reason to proceed. Every check and override is stored for audit.
 
-### Decisions taken (2026-09-12)
+### Decisions taken
 
 | Decision | Choice |
 |---|---|
 | Knowledge source | Curated local `drug_interactions` table **+** an LLM layer |
-| Model | Open-source Llama on **AWS Bedrock** (not Claude), region `ap-south-1` |
+| AI provider | **Pluggable** — any OpenAI-compatible endpoint, AWS Bedrock, or AWS SageMaker |
+| Provider config | Env vars only |
+| Prompt | A markdown file in the repo, not inlined in code |
 | Trigger | Pre-flight on save |
 | Enforcement | Warn, allow override, capture a reason |
-| Bedrock unavailable | **Fail open** — save proceeds, flagged as AI-unchecked; the curated table still fires |
+| AI unavailable | **Fail open** — save proceeds, flagged as AI-unchecked; the curated table still fires |
 | Persistence | Store every check + its outcome |
 
 The two-source design is what makes fail-open safe: the deterministic table lookup needs no network and
@@ -34,7 +37,7 @@ always runs, so an outage degrades the feature instead of disabling it.
 
 ## Architecture
 
-One Bedrock call per save, on top of a deterministic core:
+One AI call per save, on top of a deterministic core:
 
 ```
 POST /api/records/interaction-check
@@ -43,7 +46,7 @@ POST /api/records/interaction-check
   ├─ 2. Filter to still-active meds                       (parse `duration` vs `visit_date`)
   │
   ├─ 3a. DETERMINISTIC: naive-normalise names → look up `drug_interactions`   ← always runs
-  ├─ 3b. AI: one Bedrock/Llama call with {active meds, new drugs, curated table}
+  ├─ 3b. AI: one call through the provider adapter, prompt rendered from prompts/
   │        → catches brand names, misspellings, and off-table pairs; writes the prose
   │        → on any failure: skip, set ai_available=false                      ← fail open
   │
@@ -62,21 +65,20 @@ new record — so the audit trail is server-derived, never trusted from the clie
 Four phases, each a coherent commit that leaves the system working.
 
 **The build order is deliberate: the AI leg is last.** It is the only part that depends on an external
-account, region-specific model ids, and console-enabled model access. Because the design fails open, the
-deterministic table is the *load-bearing* safety component and the AI is an enhancement — so Phases 1-3
-deliver a complete, demoable, offline-capable feature, and Phase 4 can slip or fail without stranding
-half-built work.
+account or endpoint. Because the design fails open, the deterministic table is the *load-bearing* safety
+component and the AI is an enhancement — so Phases 1-3 deliver a complete, demoable, offline-capable
+feature, and Phase 4 can slip without stranding half-built work.
 
 | Phase | Scope | Depends on | External deps |
 |---|---|---|---|
 | 1 | Schema + deterministic checker + check endpoint | — | none |
 | 2 | Audit wiring into record creation | 1 | none |
 | 3 | Flutter banner + override UI + tests | 2 | none |
-| 4 | Bedrock/Llama leg | 1 | AWS account, Bedrock model access |
+| 4 | Pluggable AI layer + prompt file | 1 | one AI endpoint (any) |
 
 ---
 
-## Phase 1 — Deterministic core (backend, no AI, no AWS)
+## Phase 1 — Deterministic core (backend, no AI)
 
 Goal: `POST /api/records/interaction-check` returns real cross-clinic conflicts from the curated table.
 
@@ -119,6 +121,7 @@ model InteractionCheck {
   checked_drugs   Json                        // the new prescriptions submitted
   conflicts       Json                        // merged conflict objects returned to the client
   ai_available    Boolean   @default(false)
+  ai_provider     String?                     // which adapter answered, for debugging
   overridden      Boolean   @default(false)
   override_reason String?   @db.Text
   created_at      DateTime  @default(now())
@@ -170,7 +173,7 @@ Exports `checkInteractions({ patientId, newPrescriptions })`:
 3. `normaliseDrugName()` — lowercase, strip strength tokens (`500mg`, `5ml`), strip form words
    (`tablet|capsule|syrup|injection`), collapse whitespace. Then one `prisma.drugInteraction.findMany`
    over the candidate pairs. Source `TABLE`.
-4. Sort `CRITICAL → MINOR`, return `{ conflicts, ai_available: false }`.
+4. Sort `CRITICAL → MINOR`, return `{ conflicts, ai_available: false, ai_provider: null }`.
 
 Leave a clearly marked seam where the AI leg plugs in at Phase 4.
 
@@ -247,7 +250,7 @@ Modify `createMedicalRecord` to accept optional `check_id` and `override_reason`
 
 ## Phase 3 — Doctor UI (Flutter)
 
-Goal: the feature is visible and usable end to end, still with zero AWS dependency.
+Goal: the feature is visible and usable end to end, still with no AI dependency.
 
 ### 3.1 `lib/data/services/record_service.dart`
 
@@ -312,63 +315,164 @@ button spinner keeps animating behind the success dialog, and the new check spin
 
 ---
 
-## Phase 4 — Bedrock / Llama leg
+## Phase 4 — Pluggable AI layer
 
-Goal: catch brand names, misspellings and off-table pairs, and write better prose — without ever becoming
-a hard dependency.
+Goal: catch brand names, misspellings and off-table pairs, through **whatever AI endpoint you point it
+at** — and never become a hard dependency.
 
-### 4.0 Pre-check (do this before writing any Phase 4 code)
-
-Confirm the exact model id **and** that model access is enabled in the Bedrock console for the account:
+### 4.1 Layout
 
 ```
-aws bedrock list-foundation-models --region ap-south-1 --by-provider meta \
-  --query 'modelSummaries[].modelId'
+backend/
+├── prompts/
+│   └── drug-interaction.md              # the prompt — edited without touching code
+└── services/
+    └── ai/
+        ├── index.js                     # provider registry + complete() + isAiEnabled()
+        ├── promptLoader.js              # load + render {{placeholders}}
+        ├── parseJson.js                 # tolerant JSON extraction from model text
+        └── providers/
+            ├── openaiCompatible.js      # fetch, zero deps
+            ├── bedrock.js               # lazy @aws-sdk/client-bedrock-runtime
+            └── sagemaker.js             # lazy @aws-sdk/client-sagemaker-runtime
 ```
 
-Llama is served in `ap-south-1` and the region supports APAC cross-region inference profiles, so expect
-either an on-demand id (`meta.llama3-...`) or an `apac.`-prefixed inference-profile id. Put whichever the
-command returns into `BEDROCK_MODEL_ID` — **do not hardcode a guessed id.** If this command returns
-nothing usable, stop: Phases 1-3 already ship a working feature.
+### 4.2 The adapter contract
 
-### 4.1 `config/bedrock.js` (new, ~25 lines)
+Every provider file exports exactly this, and nothing else:
 
-Mirrors the shape of `config/prisma.js` — a lazily-created singleton client.
+```js
+module.exports = {
+  name: 'openai-compatible',
+  isConfigured(),                                  // -> bool, from env only
+  async complete({ system, user, maxTokens, temperature, signal }), // -> string
+};
+```
 
-- `@aws-sdk/client-bedrock-runtime`, `BedrockRuntimeClient` + **`ConverseCommand`** (the unified API;
-  it handles Llama's prompt format so you don't hand-roll `<|begin_of_text|>` templating).
-- Region from `BEDROCK_REGION` (default `ap-south-1`), model from `BEDROCK_MODEL_ID`.
-- Credentials resolve from the default AWS chain — `AWS_PROFILE` locally, the ECS **task role** in prod.
-  No access keys in env, consistent with how `AWS_MIGRATION_PLAN.md` §1.6 handles S3.
-- Export `isConfigured()` so the checker can skip the AI leg cleanly when unset.
+That one-method surface is what keeps this cheap to extend: **adding a provider is one new file plus one
+line in the registry**, with no change to `interactionChecker.js`.
 
-### 4.2 AI leg in `services/interactionChecker.js`
+`services/ai/index.js`:
+- Picks the adapter by `AI_PROVIDER` from a registry object; unknown value → log once, treat as disabled.
+- `isAiEnabled()` = `AI_ENABLED !== 'false'` && the adapter's `isConfigured()`.
+- `complete()` wraps the adapter with an `AbortController` timeout (`AI_TIMEOUT_MS`, default 8000) and
+  normalises every failure into one thrown `AiUnavailableError`, so the checker has a single thing to catch.
+- **`require` the AWS SDKs lazily inside the adapter**, so someone using an OpenAI key never has to install
+  `@aws-sdk/*`. List both AWS packages under `optionalDependencies`.
 
-Plug into the seam left at Phase 1. One `ConverseCommand`. System prompt: *a clinical pharmacology
-assistant; you are given a patient's active medications, the drugs about to be prescribed, and a reference
-interaction table; return JSON only.* Set `temperature: 0` and a modest `maxTokens` (~1500).
+**`openaiCompatible.js`** — one `fetch` POST to `${AI_BASE_URL}/chat/completions`, `Authorization: Bearer
+${AI_API_KEY}`, body `{ model, messages: [{role:'system'},{role:'user'}], temperature, max_tokens }`, read
+`data.choices[0].message.content`. Set `response_format: { type: 'json_object' }` when `AI_JSON_MODE=true`
+— most compat endpoints support it, a few don't, hence the flag.
 
-- Inline the full `drug_interactions` table in the prompt (it is small) so the model can match brand names
-  and typos against it, and mark each conflict `source: "TABLE"` or `source: "MODEL"`.
-- **Parse defensively** — Llama on Bedrock has no strict structured-output mode. Extract the first
-  balanced `{...}`, `JSON.parse` inside try/catch, validate each conflict has the required keys and a known
-  severity, and silently drop malformed entries. A parse failure is treated exactly like an outage.
-- Wrap the whole leg in try/catch with a timeout (~8s). Any failure → `ai_available: false`, log with the
-  house `❌` style, continue.
+**`bedrock.js`** — `BedrockRuntimeClient` + `ConverseCommand` (the unified API; it handles Llama's prompt
+format so you don't hand-roll `<|begin_of_text|>` templating). Credentials come from the default AWS chain
+— `AWS_PROFILE` locally, the ECS **task role** in prod, no access keys in env, matching how
+`AWS_MIGRATION_PLAN.md` §1.6 handles S3.
+
+**`sagemaker.js`** — `SageMakerRuntimeClient` + `InvokeEndpointCommand` against `AI_SAGEMAKER_ENDPOINT`.
+⚠️ SageMaker has **no standard payload shape** — it depends on the serving container. Target the common
+HuggingFace TGI format (`{ inputs, parameters: { max_new_tokens, temperature } }`) and put the request and
+response mapping in two clearly-commented functions at the top of the file, so retargeting a different
+container is a local edit.
+
+### 4.3 The prompt file — `prompts/drug-interaction.md`
+
+Lifted out of the code entirely, version-controlled so prompt changes show up in git diffs. One file, split
+by a `---USER---` delimiter line:
+
+```md
+You are a clinical pharmacology assistant helping a doctor at a walk-in clinic...
+Return JSON only, matching exactly: { "conflicts": [ { ... } ] }
+...
+
+---USER---
+
+## Patient's active medications (all clinics)
+{{activeMedications}}
+
+## Drugs about to be prescribed
+{{newPrescriptions}}
+
+## Reference interaction table
+{{interactionTable}}
+```
+
+`promptLoader.js` exports `renderPrompt(name, vars)` — reads `prompts/<name>.md`, splits on `---USER---`,
+substitutes `{{key}}`, returns `{ system, user }`. **Cache the file read when
+`NODE_ENV === 'production'`; re-read every call otherwise** so prompt iteration needs no restart.
+
+### 4.4 AI leg in `services/interactionChecker.js`
+
+Plug into the seam left at Phase 1:
+
+```js
+if (!isAiEnabled()) return { conflicts: tableConflicts, ai_available: false, ai_provider: null };
+try {
+  const { system, user } = renderPrompt('drug-interaction', {...});
+  const text = await complete({ system, user, temperature: 0, maxTokens: 1500 });
+  aiConflicts = parseJson(text);            // tolerant; throws on unusable output
+} catch (err) {
+  console.error('❌ AI interaction check failed:', err.message);
+  return { conflicts: tableConflicts, ai_available: false, ai_provider: null };   // ← fail open
+}
+```
+
+`parseJson.js` — models do not reliably emit bare JSON, and only some endpoints support a JSON mode.
+Extract the first balanced `{...}` (ignoring ``` fences), `JSON.parse` inside try/catch, validate each
+conflict has the required keys and a known severity, drop malformed entries. **A parse failure is treated
+exactly like an outage**, which is why this lives next to the adapters rather than in any one of them.
 
 **Merge** by normalised unordered drug pair. Table severity wins where both legs hit; keep the model's
 `explanation` and `suggested_alternative`. Sort `CRITICAL → MINOR`.
 
-### 4.3 Config + infra
+### 4.5 `scripts/test-ai-provider.js` (new) — the integration shortcut
 
-- `package.json`: add `@aws-sdk/client-bedrock-runtime`.
-- `.env.example`: add `BEDROCK_REGION=ap-south-1`, `BEDROCK_MODEL_ID=...`, `AI_INTERACTION_CHECK_ENABLED=true`.
-- `AWS_MIGRATION_PLAN.md` §1.6: add `bedrock:InvokeModel` on the target model ARN to the ECS **task role**.
+A standalone CLI that renders the real prompt with a canned warfarin/ibuprofen case, calls whatever
+provider is configured, and prints the raw text, the parsed conflicts, and the elapsed time.
 
-> **Done when:** with `AWS_PROFILE` + `BEDROCK_MODEL_ID` set, submitting the *brand* name "Brufen" instead
-> of "Ibuprofen" for a warfarin patient still returns the CRITICAL conflict and `ai_available: true` — the
-> table alone cannot do this, so it proves the AI leg adds value. Then point `BEDROCK_MODEL_ID` at a wrong
-> id and confirm the endpoint still returns 200 with table-only conflicts and `ai_available: false`.
+This is what makes a new endpoint cheap to adopt: **point the env at it, run one command, see if it
+works** — no DB, no Flutter build, no clicking through the app.
+
+### 4.6 Env — `.env.example`
+
+```bash
+# ── AI provider (any OpenAI-compatible endpoint, Bedrock, or SageMaker) ──
+AI_ENABLED=true
+AI_PROVIDER=openai-compatible        # openai-compatible | bedrock | sagemaker
+AI_TIMEOUT_MS=8000
+AI_MAX_TOKENS=1500
+
+# openai-compatible — works with OpenAI, Gemini, Groq, OpenRouter, Ollama, vLLM, LM Studio…
+AI_BASE_URL=https://api.openai.com/v1
+AI_API_KEY=
+AI_MODEL=gpt-4o-mini
+AI_JSON_MODE=true
+#   Gemini : AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+#   Groq   : AI_BASE_URL=https://api.groq.com/openai/v1
+#   Ollama : AI_BASE_URL=http://localhost:11434/v1   (AI_API_KEY can be any non-empty string)
+
+# bedrock — credentials come from the AWS chain (AWS_PROFILE locally, ECS task role in prod)
+# AI_PROVIDER=bedrock
+# AWS_REGION=ap-south-1
+# AI_MODEL=<from: aws bedrock list-foundation-models --region ap-south-1 --by-provider meta>
+
+# sagemaker
+# AI_PROVIDER=sagemaker
+# AWS_REGION=ap-south-1
+# AI_SAGEMAKER_ENDPOINT=my-llama-endpoint
+```
+
+`package.json`: add `@aws-sdk/client-bedrock-runtime` and `@aws-sdk/client-sagemaker-runtime` under
+**`optionalDependencies`**. `AWS_MIGRATION_PLAN.md` §1.6: note that if the deployed provider is Bedrock or
+SageMaker, the ECS **task role** needs `bedrock:InvokeModel` / `sagemaker:InvokeEndpoint` on that resource.
+
+> **Done when:** `node scripts/test-ai-provider.js` succeeds against at least two different providers
+> (e.g. a local Ollama and one hosted key) with no code change — only `.env` edits. Then, through the API:
+> submitting the *brand* name "Brufen" instead of "Ibuprofen" for a warfarin patient still returns the
+> CRITICAL conflict with `ai_available: true` (the table alone cannot do this, so it proves the AI leg adds
+> value). Finally set `AI_ENABLED=false` and confirm the endpoint still returns 200 with table-only
+> conflicts.
 
 ---
 
@@ -376,18 +480,21 @@ interaction table; return JSON only.* Set `temperature: 0` and a modest `maxToke
 
 Run at the end, once all four phases are in:
 
-1. **Fail-open:** unset `BEDROCK_MODEL_ID` → warfarin + ibuprofen still returns CRITICAL, `ai_available: false`.
-2. **AI value-add:** with Bedrock configured → "Brufen" is caught, `ai_available: true`.
-3. **Resilience:** wrong model id → 200 with table-only conflicts, error logged not thrown.
-4. **End to end** (you drive the browser): rebuild the doctor web profile build, log in as Dr. Default
+1. **Fail-open:** `AI_ENABLED=false` → warfarin + ibuprofen still returns CRITICAL, `ai_available: false`.
+2. **Provider portability:** `scripts/test-ai-provider.js` passes against two different providers, env-only.
+3. **AI value-add:** "Brufen" is caught, `ai_available: true`, `ai_provider` recorded on the check row.
+4. **Resilience:** point `AI_BASE_URL` at an unreachable host → 200 with table-only conflicts within the
+   timeout, error logged not thrown.
+5. **End to end** (you drive the browser): rebuild the doctor web profile build, log in as Dr. Default
    Doctor, open a patient with a warfarin history, add ibuprofen, hit save → red banner with Clinic A's
    name and date → save refused without a reason → enter one → record saves and the appointment flips to
    completed.
-5. **Audit:** query `interaction_checks` — one row, `record_id` set, `overridden = true`, reason stored.
-6. `cd mobile_app && flutter analyze && flutter test`.
+6. **Audit:** query `interaction_checks` — one row, `record_id` set, `overridden = true`, reason stored.
+7. `cd mobile_app && flutter analyze && flutter test`.
 
 ## Docs to update (per `CLAUDE.md`)
 
 - `SNAPSHOT.md` — after Phase 1 add `services/interactionChecker.js`, `utils/prescriptionWindow.js`,
-  `scripts/seed-drug-interactions.js`, migration #3; after Phase 4 add `config/bedrock.js`.
+  `scripts/seed-drug-interactions.js`, migration #3; after Phase 4 add the `prompts/` and `services/ai/`
+  trees and `scripts/test-ai-provider.js`.
 - `MEMORY.md` — a dated note per phase as it lands, replacing the "plan only" status.

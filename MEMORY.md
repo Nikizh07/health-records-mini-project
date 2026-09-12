@@ -24,7 +24,9 @@ Cloud-based digital health record and appointment system for migrant worker clin
 ## Planned: AI cross-clinic medication conflict detector
 - **Decision (2026-09-12):** warn a doctor at save time when a new prescription conflicts with a drug another clinic already started. Full plan: `AI_DRUG_INTERACTION_PLAN.md`.
 - Two knowledge sources: a seeded `drug_interactions` reference table (deterministic, always runs) **plus** an LLM leg.
-- **The model is open-source Llama on AWS Bedrock, not Claude** — `ap-south-1`, via `ConverseCommand`. Bedrock model ids are region-specific, so the exact id must come from `aws bedrock list-foundation-models --region ap-south-1 --by-provider meta`, never guessed.
+- **The AI provider is pluggable, configured by env vars only** (2026-09-12). One adapter contract (`isConfigured()` + `complete({system,user})`) with three implementations: `openai-compatible` (plain `fetch`, no deps — covers OpenAI, Gemini's compat endpoint, Groq, OpenRouter, Ollama, vLLM, any custom URL), `bedrock`, and `sagemaker`. Adding a provider = one file + one registry line. AWS SDKs are `optionalDependencies`, lazily required.
+- **The prompt lives in `backend/prompts/drug-interaction.md`, not in code** — `{{placeholders}}`, split into system/user by a `---USER---` line, cached only in production so prompt edits need no restart.
+- Bedrock model ids are region-specific: get the exact id from `aws bedrock list-foundation-models --region ap-south-1 --by-provider meta`, never guess. SageMaker has no standard payload shape — the adapter targets HuggingFace TGI and the mapping is meant to be edited.
 - **Fails open by design**: if Bedrock is unreachable the save still proceeds, flagged `ai_available: false`, and the curated table still fires. Never block a clinic on an LLM outage.
 - Conflicts warn but don't block; the doctor must give an override reason, and every check is stored in `interaction_checks` for audit.
 - **Status: plan only. No code changes made yet.**
