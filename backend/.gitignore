@@ -4,15 +4,15 @@
 node_modules/
 
 # Real environment file — NEVER commit this
-.env
-.env.local
-.env.*.local
+# .env
+# .env.local
+# .env.*.local
 
 # Firebase service account key (downloaded from Firebase Console)
-firebase-adminsdk*.json
-service-account*.json
-*.pem
-*.key
+# firebase-adminsdk*.json
+# service-account*.json
+# *.pem
+# *.key
 
 # Logs
 *.log

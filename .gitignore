@@ -18,17 +18,17 @@ out/
 .nuxt/
 
 # Environment Variables & Secrets (CRITICAL)
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-*.pem
-*.key
-*.p12
-*.pfx
-service-account*.json
-firebase-adminsdk*.json
+# .env
+# .env.local
+# .env.development.local
+# .env.test.local
+# .env.production.local
+# *.pem
+# *.key
+# *.p12
+# *.pfx
+# service-account*.json
+# firebase-adminsdk*.json
 
 # ==========================================
 # Flutter & Dart
