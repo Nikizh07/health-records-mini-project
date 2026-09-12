@@ -21,6 +21,14 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Full plan: `AWS_MIGRATION_PLAN.md`.
 - **Status: plan only. No code changes made yet.**
 
+## Planned: AI cross-clinic medication conflict detector
+- **Decision (2026-09-12):** warn a doctor at save time when a new prescription conflicts with a drug another clinic already started. Full plan: `AI_DRUG_INTERACTION_PLAN.md`.
+- Two knowledge sources: a seeded `drug_interactions` reference table (deterministic, always runs) **plus** an LLM leg.
+- **The model is open-source Llama on AWS Bedrock, not Claude** — `ap-south-1`, via `ConverseCommand`. Bedrock model ids are region-specific, so the exact id must come from `aws bedrock list-foundation-models --region ap-south-1 --by-provider meta`, never guessed.
+- **Fails open by design**: if Bedrock is unreachable the save still proceeds, flagged `ai_available: false`, and the curated table still fires. Never block a clinic on an LLM outage.
+- Conflicts warn but don't block; the doctor must give an override reason, and every check is stored in `interaction_checks` for audit.
+- **Status: plan only. No code changes made yet.**
+
 ## Known gotchas
 - `backend/config/firebase.js` falls back to Google ADC when the key file is missing. That will fail on AWS, and the key is dockerignored, so it must be injected as the `FIREBASE_SERVICE_ACCOUNT_JSON` secret.
 - `backend/config/db.js` is unused. `config/prisma.js` is the real DB client.
