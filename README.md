@@ -4,35 +4,57 @@
 ![Flutter](https://img.shields.io/badge/Flutter-02569B?style=flat&logo=flutter&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white)
-![Google Cloud](https://img.shields.io/badge/Google_Cloud-4285F4?style=flat&logo=google-cloud&logoColor=white)
+![Prisma](https://img.shields.io/badge/Prisma-2D3748?style=flat&logo=prisma&logoColor=white)
+![Firebase](https://img.shields.io/badge/Firebase_Auth-FFCA28?style=flat&logo=firebase&logoColor=black)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white)
-![License](https://img.shields.io/badge/license-MIT-green)
 
-A cloud-native mobile platform that gives migrant workers a **portable digital health record** — one that follows them across clinics and cities — combined with an appointment booking system that participating clinics can manage in real time.
-
----
+A platform that gives migrant workers a **portable digital health record** that follows them across clinics and cities. It also includes an appointment system that participating clinics manage in real time.
 
 ---
 
 ## Problem statement
 
-Migrant workers frequently relocate for work across cities and states, which fractures their access to continuous healthcare. Medical history, prescriptions, and vaccination records stay siloed at the clinic where they were created — so a worker who visits a new clinic starts from zero, leading to repeated diagnostics, medication errors, and gaps in care.
+Migrant workers often move between cities and states for work, which breaks up their access to continuous healthcare. Medical history, prescriptions and vaccination records stay at the clinic that created them. A worker who visits a new clinic starts from zero, which leads to repeated tests, medication errors and gaps in care.
 
-This project addresses that gap with a **multi-tenant, cloud-hosted health record system**: every participating clinic connects to the same backend, so a patient's record and appointment history are accessible from anywhere in the network.
+This project closes that gap with a **shared, multi-clinic health record system**. Every participating clinic connects to the same backend, so a patient's records and appointments can be seen from any clinic in the network.
+
+---
+
+## Project status
+
+| Area | Status |
+|---|---|
+| Patient app (Android + web) | Working |
+| Doctor / admin portal (web, for PC) | Working |
+| Backend API + PostgreSQL | Working, runs locally |
+| Drug interaction warnings | Working, using a list of 56 known drug pairs |
+| AI-assisted interaction check | Planned, see [`AI_DRUG_INTERACTION_PLAN.md`](AI_DRUG_INTERACTION_PLAN.md) |
+| Cloud deployment | Planned on AWS (RDS, S3, ECS Fargate), see [`AWS_MIGRATION_PLAN.md`](AWS_MIGRATION_PLAN.md). Nothing is deployed yet. |
+| Push notifications | Not built. Screens poll every 10 s instead. |
 
 ---
 
 ## Key features
 
-- **Portable digital health ID** — a unique identifier that follows the patient across every registered clinic
-- **OTP-based authentication** — phone number login via Firebase Auth, no passwords to manage
-- **Cross-clinic appointment booking** — book, reschedule, or cancel appointments at any participating clinic
-- **Digital medical records** — diagnosis, prescriptions, and visit notes stored centrally and accessible instantly
-- **Live updates** — the doctor's queue and the patient's appointments and records refresh every 10 s while open, so a booking or a saved visit shows up on the other side without a manual refresh
-- **File uploads** — scanned lab reports and prescriptions stored securely in the cloud
-- **Push notifications** — automated appointment reminders via Firebase Cloud Messaging
-- **Role-based access** — separate views for patients, doctors, and clinic admins
-- **Multilingual UI** — accessible to workers across different regional languages
+**For patients**
+- **Portable health ID**: every patient gets an ID like `MWH-XXXXXX` that works at every registered clinic
+- **Phone OTP or guest login** via Firebase Auth, with no passwords to manage
+- **Appointments at any clinic**: book, reschedule or cancel. Clinics are listed nearest first.
+- **Health records**: diagnoses, prescriptions, visit notes and attached reports from every clinic in one place
+- **Multilingual UI** in English, Hindi and Tamil
+
+**For doctors and clinic staff**
+- **Today's queue**: the doctor's appointments, refreshed every 10 s
+- **Patient lookup** with full history across clinics
+- **Walk-ins**: create a confirmed appointment for right now and start the visit straight away
+- **Visit form** with diagnosis, notes and prescriptions. Ctrl+Enter saves. Reports can be attached through the API (`POST /api/records/:id/upload`), but the app has no upload screen yet.
+- **Drug interaction warnings**: before a visit is saved, each new prescription is checked against:
+  - drugs the patient is still taking from **any clinic**
+  - the other drugs in the **same prescription**
+
+  If there's a conflict, a banner names the drugs, how serious it is and which clinic prescribed the existing drug. The doctor can still save, but has to give a reason, and every check is kept for audit.
+- **Admin portal**: manage clinics and doctors
+- **Role-based access** for PATIENT, DOCTOR and ADMIN, enforced by the backend
 
 ---
 
@@ -40,69 +62,72 @@ This project addresses that gap with a **multi-tenant, cloud-hosted health recor
 
 | Layer | Technology |
 |---|---|
-| Mobile app | Flutter (Dart), Riverpod, go_router |
-| Backend API | Node.js, Express |
-| Database | PostgreSQL (Google Cloud SQL) |
-| Authentication | Firebase Authentication (Phone OTP) |
-| File storage | Google Cloud Storage |
-| Push notifications | Firebase Cloud Messaging (FCM) |
-| Containerization | Docker |
-| Deployment | Google Cloud Run |
-| CI/CD | GitHub Actions |
-| Monitoring | Google Cloud Monitoring & Logging |
+| Mobile / web app | Flutter (Dart), Riverpod, go_router, Dio, Hive (local cache) |
+| Backend API | Node.js 22, Express 4 |
+| Database | PostgreSQL 16, Prisma 7 (`@prisma/adapter-pg`) |
+| Authentication | Firebase Authentication (phone OTP + anonymous guest), verified server-side with `firebase-admin` |
+| File storage | Local disk via Multer (`backend/uploads/`). Moving to S3 is planned. |
+| Containers | Docker (backend image, local Postgres via Docker Compose) |
+| CI | GitHub Actions: `flutter analyze` + `flutter test`, and an installable Android APK on every push to `main` |
 
 ---
 
 ## System architecture
 
 ```
-Flutter Mobile App
+Flutter app (Android / web)
         │
-        ▼  HTTPS / REST
-   Cloud Run (Node.js API)
+        ▼  REST + Firebase ID token
+   Node.js / Express API ──────► Firebase Auth (token verification)
         │
-   ┌────┼────────┬─────────────┐
-   ▼    ▼        ▼             ▼
-Cloud  Cloud   Firebase       FCM
- SQL  Storage    Auth      (reminders)
+   ┌────┴─────────────┐
+   ▼                  ▼
+PostgreSQL      Local uploads
+ (Prisma)       (reports)
 ```
 
-The mobile app never talks to the database, storage, or auth services directly — every request goes through the Cloud Run API, which is the single point of control for authorization, validation, and business logic.
+The app never talks to the database or storage directly. Every request goes through the API, which handles authorization, validation and business logic.
 
 ---
 
 ## Database schema
 
-Core entities: `Patient`, `Doctor`, `Clinic`, `Appointment`, `MedicalRecord`, `Prescription`.
+Core entities: `User`, `Patient`, `Doctor`, `Clinic`, `Appointment`, `MedicalRecord`, `Prescription`, plus `DrugInteraction` and `InteractionCheck` for the drug interaction checker.
 
-- One **Patient** → many **Appointments** and **MedicalRecords**
-- One **Clinic** → many **Doctors** and **Appointments**
-- One **MedicalRecord** → many **Prescriptions**
+- One **Clinic** has many **Doctors** and **Appointments**
+- One **Patient** has many **Appointments** and **MedicalRecords**
+- One **MedicalRecord** has many **Prescriptions**
+- **InteractionCheck** stores every pre-save check, the conflicts it found and the doctor's override reason
 
-Full schema with field types and constraints is documented in [`docs/database-schema.md`](docs/database-schema.md).
+The full schema is in [`backend/prisma/schema.prisma`](backend/prisma/schema.prisma).
 
 ---
 
 ## Project structure
 
 ```
-project-root/
-├── mobile_app/             # Flutter app (Android + web for the clinic side)
-│   └── lib/
-│       ├── core/            # constants, theme, utils
-│       ├── data/             # models, repositories, services
-│       ├── providers/        # Riverpod state providers
-│       ├── presentation/     # screens and widgets
-│       └── routes/           # go_router config
-├── backend/                # Node.js + Express API
-│   ├── routes/
-│   ├── controllers/
-│   ├── models/
-│   └── middleware/
-├── docs/                    # diagrams, schema, reports
-├── .github/workflows/       # CI/CD pipeline definitions
-├── Dockerfile
-└── README.md
+.
+├── mobile_app/                 # Flutter app: patient side + doctor/admin portal
+│   ├── lib/
+│   │   ├── core/               # constants, network client, theme, utils
+│   │   ├── data/services/      # API services (auth, appointments, records, admin)
+│   │   ├── providers/          # Riverpod providers
+│   │   ├── presentation/       # screens and widgets
+│   │   ├── l10n/               # en / hi / ta translations
+│   │   └── routes/             # go_router config
+│   └── test/                   # widget and flow tests
+├── backend/                    # Node.js + Express API
+│   ├── server.js
+│   ├── docker-compose.yml      # local PostgreSQL
+│   ├── Dockerfile
+│   ├── routes/  controllers/  middleware/
+│   ├── services/               # drug interaction checker
+│   ├── utils/                  # health ID, drug name normalisation, prescription window
+│   ├── prisma/                 # schema + migrations
+│   └── scripts/                # seeders, role tools, test suite
+├── .github/workflows/          # CI (APK build)
+├── AWS_MIGRATION_PLAN.md
+└── AI_DRUG_INTERACTION_PLAN.md
 ```
 
 ---
@@ -110,90 +135,133 @@ project-root/
 ## Getting started
 
 ### Prerequisites
-- Flutter SDK
-- Node.js (v18+)
+- Flutter SDK (Dart 3.12+)
+- Node.js 22
 - Docker
-- Google Cloud SDK (`gcloud` CLI)
-- A Firebase project (for Auth and FCM)
+- A Firebase project with Phone and Anonymous sign-in enabled, and a service account key
 
-### Backend setup
+### 1. Database
+```bash
+cd backend
+cp .env.example .env        # set DATABASE_URL and a matching POSTGRES_PASSWORD
+docker compose up -d
+```
+
+### 2. Backend
 ```bash
 cd backend
 npm install
-cp .env.example .env      # fill in your credentials
-npm run dev
+npx prisma migrate deploy
+node scripts/seed-nearby-clinics.js
+node scripts/seed-drug-interactions.js
+npm run dev                 # http://localhost:3000/api/health
 ```
+Put the Firebase service account key at `backend/config/firebase-adminsdk.json`, or point `FIREBASE_SERVICE_ACCOUNT_PATH` at it.
 
-### Mobile app setup
+### 3. Mobile app
 ```bash
 cd mobile_app
 flutter pub get
 flutter run --dart-define=API_BASE_URL=http://<host>:3000/api
 ```
-`API_BASE_URL` defaults to `http://localhost:3000/api`. Release builds only accept an `https://` URL, so run debug or `--profile` builds locally.
+- `API_BASE_URL` defaults to `http://localhost:3000/api`.
+- Release builds only accept an `https://` URL, so run debug or `--profile` builds locally.
+- To test on an Android phone over adb, run `adb reverse tcp:3000 tcp:3000` and keep the default URL.
 
 ### Running the doctor portal locally (web)
 The clinic side (doctor/admin) is built for a PC browser. Keep the window at least 800 px wide to get the side navigation.
 
-1. **Backend:** `cd backend && npm run dev`
+1. **Backend:** start the database and the backend as above.
 2. **Patient app** at http://localhost:5000: run `cd mobile_app && flutter run -d web-server --web-port 5000`, click *Continue as guest* and register.
-3. **Doctor portal** at http://localhost:5001: build with `cd mobile_app && flutter build web --profile`, then serve it with `python3 -m http.server 5001 --directory build/web`. Open it in a **separate browser profile or a private window**, because Firebase keeps one login per browser.
+3. **Doctor portal** at http://localhost:5001:
+   - Build it with `cd mobile_app && flutter build web --profile`.
+   - Serve it with `python3 -m http.server 5001 --directory build/web`.
+   - Open it in a **separate browser profile or a private window**, because Firebase keeps one login per browser.
+   - **After every rebuild, hard-reload the tab (Ctrl+Shift+R).** An already-open tab keeps running the old build.
 4. **Test doctor login:** phone `9999900001`, OTP `123456`. This needs three things:
    - In the Firebase console, go to Authentication → Sign-in method → Phone → *Phone numbers for testing* and add `+91 9999900001` with code `123456`.
    - Authentication → Settings → *SMS region policy* must allow India.
    - A doctor with that phone must exist. An admin can add one in the admin portal, or an API client can call `POST /api/doctors`. The first login with that number links the account as DOCTOR. To turn an existing account into a doctor instead, run `node backend/scripts/set-user-role.js <phone> DOCTOR "<name>" "<specialization>"`.
-5. **The flow:**
+5. **The first admin** has to be created from the command line after that account has signed in once: `node backend/scripts/set-user-role.js <phone> ADMIN`.
+6. **The flow:**
    - The patient books *Central Migrant Health Hub* → the doctor, for today.
    - The appointment appears in the doctor's queue within about 10 s.
    - The doctor opens it and saves the visit (Ctrl+Enter), which marks the appointment completed.
    - The patient's *My Appointments* and *Health Records* show the update within about 10 s.
    - **Walk-ins:** a doctor can also open *Patient Lookup*, find the patient and click **Walk-in**. This creates a confirmed appointment for right now, puts it in the doctor's queue, and shows it in the patient's *My Appointments*. The snackbar's *Start visit* opens the visit form for that appointment.
+   - **Drug interactions:** prescribe *warfarin* and *ibuprofen* in one visit. A red banner appears, and the save button changes to **Save Anyway**, which asks for a reason. After a patient has a saved warfarin prescription, prescribing *naproxen* in a later visit shows the warning with the clinic and date of the earlier prescription.
 
 ---
 
 ## Environment variables
 
-Create a `.env` file in `/backend` with:
+Set these in `backend/.env` (template: `backend/.env.example`):
 
-```
-DATABASE_URL=your_cloud_sql_connection_string
-FIREBASE_PROJECT_ID=your_firebase_project_id
-GCS_BUCKET_NAME=your_storage_bucket_name
-PORT=8080
-```
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string, e.g. `postgresql://postgres:<password>@localhost:5432/migrant_clinic_db` |
+| `POSTGRES_PASSWORD` | Password for the Docker Compose database. It must match `DATABASE_URL`. |
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to the Firebase service account key (default `./config/firebase-adminsdk.json`) |
+| `PORT` | API port (default `3000`) |
+| `NODE_ENV` | `development` or `production` |
 
-Never commit `.env` files — `.gitignore` is already configured to exclude them.
+`FIREBASE_PROJECT_ID`, `GCS_BUCKET_NAME` and `ALLOWED_ORIGINS` are in the template, but the code doesn't read them yet.
 
----
-
-## CI/CD pipeline
-
-On every push to `main`:
-1. GitHub Actions installs dependencies and runs backend tests
-2. Builds a Docker image of the backend
-3. Pushes the image to Google Artifact Registry
-4. Deploys automatically to Google Cloud Run
-
-Pipeline definition: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
+**Keep secrets out of git.** That means `backend/.env` and the Firebase service account key.
 
 ---
 
-## Cloud computing concepts demonstrated
+## Testing
 
-This project was built as a **Cloud Computing domain mini project**, and intentionally demonstrates:
+```bash
+cd mobile_app && flutter analyze && flutter test
+```
+```bash
+cd backend && node scripts/test-interactions.js
+```
+- `flutter test` covers the role gate and the doctor/admin screens. It uses the real router with fake services.
+- `test-interactions.js` runs 80 drug interaction checks against the real API and database. Firebase is stubbed, so it needs no device or credentials, and it removes its own test data.
 
-- **PaaS** — Cloud Run for backend hosting, no server management
-- **DBaaS** — Cloud SQL as a managed relational database
-- **SaaS-consumption** — Firebase Auth, FCM, and Cloud Storage as fully managed services
-- **Elasticity** — Cloud Run auto-scales backend instances based on load
-- **Multi-tenancy** — a single cloud backend serves multiple independent clinics
-- **CI/CD automation** — GitHub Actions handles build, test, and deploy with zero manual steps
-- **Cloud monitoring & observability** — centralized logs and metrics via Cloud Monitoring
+---
+
+## CI
+
+[`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml) runs on every push to `main` that touches `mobile_app/`:
+1. `flutter analyze` and `flutter test`
+2. Builds an Android APK and uploads it as a workflow artifact, kept for 30 days:
+   - with no `API_BASE_URL` repository variable, a debug APK
+   - with an `https://` URL set, a release APK
+
+There's also a backend image workflow, `.github/workflows/deploy-container`. It lacks the `.yml` extension, so GitHub never runs it.
+
+---
+
+## Known limitations
+
+- Uploaded reports under `/uploads` are served **without authentication**. Anyone with the URL can open them until the move to S3 with signed URLs.
+- Screens poll every 10 s rather than receiving push updates.
+- The doctor queue's date filter uses UTC day boundaries, so bookings before 05:30 IST appear under the previous day.
+
+---
+
+## Cloud computing concepts
+
+This project was built as a **Cloud Computing domain mini project**. The planned AWS deployment is designed to demonstrate:
+
+- **Managed database (DBaaS)**: Amazon RDS for PostgreSQL
+- **Object storage**: private S3 buckets with presigned URLs for medical reports
+- **Containers**: the backend as a Docker image on ECS Fargate, which scales without managing servers
+- **Managed services**: Firebase Authentication for identity
+- **Multi-tenancy**: one backend serves many independent clinics
+- **CI/CD automation**: GitHub Actions builds and tests on every push
 
 ---
 
 ## Roadmap
 
+- [ ] Deploy to AWS (RDS, S3, ECS Fargate)
+- [ ] AI-assisted drug interaction check alongside the known-pair list
+- [ ] Push notifications for appointment reminders
 - [ ] Offline-first sync for low-connectivity areas
 - [ ] Terraform scripts for infrastructure-as-code
 - [ ] Admin analytics dashboard (patient footfall, disease trends)
@@ -203,6 +271,6 @@ This project was built as a **Cloud Computing domain mini project**, and intenti
 
 ## Author
 
-Developed as a Semester 5 mini project — Cloud Computing domain.
+Developed as a Semester 5 mini project in the Cloud Computing domain.
 
 *Feel free to open an issue or reach out with questions about the architecture or setup.*
