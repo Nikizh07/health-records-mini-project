@@ -10,6 +10,7 @@
 
 ## Working rules
 - When asked for a plan, write it to a `.md` file in the repo and stop. Implement only when explicitly asked.
+- Git commits and PRs: never add Claude as a co-author (no `Co-Authored-By` line, no "Generated with Claude Code" footer).
 - Never commit, print or publish secrets: `backend/.env`, `backend/config/firebase-adminsdk.json`.
 - Firebase (Auth + Admin) stays as is. The AWS migration covers only the DB, storage and backend hosting (see `AWS_MIGRATION_PLAN.md`).
 
