@@ -25,6 +25,7 @@ Suggested region: `ap-south-1` (Mumbai), since the users are in India (hi/ta loc
    - `FIREBASE_SERVICE_ACCOUNT_JSON` = full contents of `firebase-adminsdk.json`
 6. **IAM**:
    - ECS **task role**: `s3:PutObject`, `s3:GetObject` on `arn:aws:s3:::<bucket>/reports/*`. This means no access keys in env.
+   - If the drug-interaction AI leg runs on Bedrock or SageMaker (`AI_PROVIDER`, see `AI_DRUG_INTERACTION_PLAN.md` Phase 4), the same task role also needs `bedrock:InvokeModel` on the model ARN, or `sagemaker:InvokeEndpoint` on the endpoint ARN.
    - ECS **execution role**: `AmazonECSTaskExecutionRolePolicy` + `secretsmanager:GetSecretValue` on the 2 secrets.
    - **GitHub OIDC role** for CI: ECR push + `ecs:UpdateService`.
 7. **ECS Fargate service** (use *ECS Express Mode* if your console offers it; it creates the ALB, HTTPS URL and autoscaling for you. Otherwise use a plain Fargate service behind an ALB with an ACM cert):

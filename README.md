@@ -28,7 +28,7 @@ This project closes that gap with a **shared, multi-clinic health record system*
 | Doctor / admin portal (web, for PC) | Working |
 | Backend API + PostgreSQL | Working, runs locally |
 | Drug interaction warnings | Working, using a list of 56 known drug pairs |
-| AI-assisted interaction check | Planned, see [`AI_DRUG_INTERACTION_PLAN.md`](AI_DRUG_INTERACTION_PLAN.md) |
+| AI-assisted interaction check | Built, off until `AI_*` env vars are set (see `backend/.env.example`); not yet tried with a real model |
 | Cloud deployment | Planned on AWS (RDS, S3, ECS Fargate), see [`AWS_MIGRATION_PLAN.md`](AWS_MIGRATION_PLAN.md). Nothing is deployed yet. |
 | Push notifications | Not built. Screens poll every 10 s instead. |
 
@@ -220,7 +220,8 @@ cd mobile_app && flutter analyze && flutter test
 cd backend && node scripts/test-interactions.js
 ```
 - `flutter test` covers the role gate and the doctor/admin screens. It uses the real router with fake services.
-- `test-interactions.js` runs 80 drug interaction checks against the real API and database. Firebase is stubbed, so it needs no device or credentials, and it removes its own test data.
+- `test-interactions.js` runs 112 drug interaction checks against the real API and database. Firebase and the AI provider are faked, so it needs no device or credentials, and it removes its own test data.
+- `node scripts/test-ai-provider.js` sends one canned case to whichever AI provider `backend/.env` configures and prints the reply.
 
 ---
 

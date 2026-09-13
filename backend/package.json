@@ -33,5 +33,9 @@
     "prisma": "^7.9.1",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
+  },
+  "optionalDependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1131.0",
+    "@aws-sdk/client-sagemaker-runtime": "^3.1131.0"
   }
 }

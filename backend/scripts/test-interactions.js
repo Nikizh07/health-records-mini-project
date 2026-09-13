@@ -2,8 +2,8 @@
 // ============================================================
 // Drug interaction feature — end-to-end regression suite
 // ============================================================
-// Covers Phase 1 (the cross-clinic checker) and Phase 2 (the audit wiring
-// on save), driving the real Express app over HTTP so the genuine
+// Covers Phase 1 (the cross-clinic checker), Phase 2 (the audit wiring
+// on save) and Phase 4 (the AI leg, against a fake provider), driving the real Express app over HTTP so the genuine
 // authenticate → requireRole → controller → errorHandler stack runs.
 //
 // Firebase is stubbed in require.cache before the app loads, so no
@@ -20,6 +20,7 @@
 
 'use strict';
 
+const http = require('http');
 const path = require('path');
 
 const BACKEND = path.resolve(__dirname, '..');
@@ -27,6 +28,9 @@ const PORT = process.env.TEST_PORT || 3997;
 
 process.env.PORT = String(PORT);
 process.env.NODE_ENV = 'development';
+// The AI leg stays off whatever backend/.env says; Phase 4 below switches it
+// on against a fake provider in this process.
+process.env.AI_ENABLED = 'false';
 
 // ── Stub Firebase BEFORE anything requires it ────────────────
 // A test token is "test.<base64 of the decoded-token JSON>".
@@ -213,7 +217,7 @@ async function main() {
   ok('explains the mechanism', /bleeding/i.test(first.explanation || ''), first.explanation);
   ok('suggests an alternative', !!first.suggested_alternative, first.suggested_alternative);
   ok('source TABLE', first.source === 'TABLE', first.source);
-  ok('ai_available false until Phase 4', check.body.data.ai_available === false);
+  ok('ai_available false with AI switched off', check.body.data.ai_available === false);
   ok('returns a check_id', typeof check.body.data.check_id === 'string');
 
   section('Name normalisation');
@@ -222,7 +226,7 @@ async function main() {
     ok(`"${variant}" matches`, (r.body?.data?.conflicts || []).length === 1);
   }
   const brand = await api('POST', '/records/interaction-check', { token: DOC, body: { patient_id: patient.id, prescriptions: [rx('Brufen 400mg')] } });
-  ok('brand name not matched (needs the Phase 4 AI leg)', (brand.body?.data?.conflicts || []).length === 0);
+  ok('brand name not matched by the table alone', (brand.body?.data?.conflicts || []).length === 0);
 
   section('Which past prescriptions still count');
   const expired = await api('POST', '/records/interaction-check', { token: DOC, body: { patient_id: patient.id, prescriptions: [rx('Methotrexate 2.5mg', '4 weeks')] } });
@@ -380,6 +384,143 @@ async function main() {
   const history = await api('GET', `/records/patient/${patient.id}`, { token: DOC });
   const historyRecords = history.body?.data?.records || history.body?.data || [];
   ok('history still reads back across clinics', history.status === 200 && new Set(historyRecords.map((r) => r.doctor?.clinic?.name).filter(Boolean)).size >= 2);
+
+  // ══════════════════════════════════════════════════════════
+  heading('PHASE 4 — the AI leg (fake OpenAI-compatible provider)');
+
+  // A local /chat/completions endpoint. `aiReply` decides each response.
+  let aiReply = () => ({ conflicts: [] });
+  let aiRequests = [];
+  const fakeAi = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', async () => {
+      aiRequests.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(raw) });
+      const reply = await aiReply();
+      if (reply === 'HTTP500') { res.writeHead(500); res.end('boom'); return; }
+      const content = typeof reply === 'string' ? reply : JSON.stringify(reply);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+    });
+  });
+  await new Promise((r) => fakeAi.listen(0, '127.0.0.1', r));
+
+  Object.assign(process.env, {
+    AI_ENABLED: 'true',
+    AI_PROVIDER: 'openai-compatible',
+    AI_BASE_URL: `http://127.0.0.1:${fakeAi.address().port}/v1/`,
+    AI_API_KEY: 'fake-key',
+    AI_MODEL: 'fake-model',
+    AI_JSON_MODE: 'true',
+    AI_TIMEOUT_MS: '1500',
+  });
+
+  const checkRx = (prescriptions, patientId = patient.id) =>
+    api('POST', '/records/interaction-check', { token: DOC, body: { patient_id: patientId, prescriptions } });
+  const aiConflict = (new_drug, existing_drug, severity, explanation = 'Model explanation.', suggested_alternative = null) =>
+    ({ new_drug, existing_drug, severity, explanation, suggested_alternative });
+
+  section('A brand name the table cannot match');
+  aiReply = () => ({ conflicts: [aiConflict('Brufen 400mg', 'Warfarin 5mg', 'CRITICAL', 'Brufen is ibuprofen; bleeding risk.', 'Paracetamol')] });
+  aiRequests = [];
+  const brufen = await checkRx([rx('Brufen 400mg')]);
+  const brufenConflict = brufen.body?.data?.conflicts?.[0] || {};
+  ok('200 OK', brufen.status === 200, `got ${brufen.status}`);
+  ok('ai_available true', brufen.body?.data?.ai_available === true);
+  ok('Brufen + warfarin reported CRITICAL', brufenConflict.severity === 'CRITICAL' && brufenConflict.new_drug === 'Brufen 400mg', JSON.stringify(brufenConflict));
+  ok('clinic and date come from the record, not the model', brufenConflict.clinic_name === `${TAG} Clinic A` && !!brufenConflict.prescribed_on);
+  ok('source AI, scope EXISTING', brufenConflict.source === 'AI' && brufenConflict.scope === 'EXISTING');
+  const brufenRow = await prisma.interactionCheck.findUnique({ where: { id: brufen.body.data.check_id } });
+  ok('ai_provider recorded on the check row', brufenRow.ai_available === true && brufenRow.ai_provider === 'openai-compatible', brufenRow.ai_provider);
+
+  section('What the provider is sent');
+  const sent = aiRequests[0] || { body: { messages: [] } };
+  const userMsg = sent.body.messages.find((m) => m.role === 'user')?.content || '';
+  const systemMsg = sent.body.messages.find((m) => m.role === 'system')?.content || '';
+  ok('POST /v1/chat/completions (trailing slash tolerated)', sent.url === '/v1/chat/completions', sent.url);
+  ok('bearer key and model', sent.auth === 'Bearer fake-key' && sent.body.model === 'fake-model');
+  ok('JSON mode and temperature 0', sent.body.response_format?.type === 'json_object' && sent.body.temperature === 0);
+  ok('prompt lists the active cross-clinic med', userMsg.includes('Warfarin 5mg'));
+  ok('prompt lists the new drug', userMsg.includes('Brufen 400mg'));
+  ok('prompt carries the curated table', /ibuprofen \+ warfarin: CRITICAL/.test(userMsg));
+  ok('system prompt comes from the prompt file', /Return JSON only/.test(systemMsg) && !systemMsg.includes('---USER---'));
+  ok('no finished course is sent', !userMsg.includes('Amoxicillin'));
+
+  section('Table and model agree on a pair');
+  aiReply = () => ({ conflicts: [aiConflict('Warfarin 5mg', 'Ibuprofen 400mg', 'MINOR', 'Model prose for the pair.')] });
+  const both = await checkRx(IBU);
+  const bothList = both.body?.data?.conflicts || [];
+  ok('reported once (model swapped the sides)', bothList.length === 1, JSON.stringify(bothList));
+  ok('table severity wins', bothList[0]?.severity === 'CRITICAL', bothList[0]?.severity);
+  ok("model's explanation kept", bothList[0]?.explanation === 'Model prose for the pair.');
+  ok('table alternative kept when the model gives none', !!bothList[0]?.suggested_alternative);
+
+  section('Model output is not trusted blindly');
+  aiReply = () => ({ conflicts: [
+    aiConflict('Brufen 400mg', 'Digoxin 250mcg', 'MAJOR'),          // not in either list
+    aiConflict('Brufen 400mg', 'Warfarin 5mg', 'SEVERE'),           // unknown severity
+    { new_drug: 'Brufen 400mg', existing_drug: 'Warfarin 5mg' },     // missing fields
+  ] });
+  const junk = await checkRx([rx('Brufen 400mg')]);
+  ok('invented drugs and malformed entries dropped', junk.body?.data?.conflicts?.length === 0, JSON.stringify(junk.body?.data?.conflicts));
+  ok('  and the AI still counts as available', junk.body?.data?.ai_available === true);
+
+  aiReply = () => 'Sure! Here you go:\n```json\n' + JSON.stringify({ conflicts: [aiConflict('Brufen 400mg', 'Warfarin 5mg', 'MAJOR', 'Has a } brace.')] }) + '\n```';
+  const fenced = await checkRx([rx('Brufen 400mg')]);
+  ok('prose and code fences around the JSON tolerated', fenced.body?.data?.conflicts?.[0]?.explanation === 'Has a } brace.', JSON.stringify(fenced.body?.data));
+
+  section('Same-visit pair only the model knows');
+  const freshPatient = await newPatient();
+  aiReply = () => ({ conflicts: [aiConflict('Brufen 400mg', 'Coumadin 5mg', 'CRITICAL')] });
+  const aiSv = await checkRx([rx('Brufen 400mg'), rx('Coumadin 5mg')], freshPatient.id);
+  const svAi = aiSv.body?.data?.conflicts?.[0] || {};
+  ok('reported as SAME_VISIT with no clinic or date', svAi.scope === 'SAME_VISIT' && svAi.clinic_name === null && svAi.prescribed_on === null, JSON.stringify(svAi));
+
+  section('Fail open');
+  const expectTableOnly = (r, label) => {
+    const list = r.body?.data?.conflicts || [];
+    ok(`${label} → 200, table-only CRITICAL, ai_available false`,
+      r.status === 200 && r.body.data.ai_available === false && list.length === 1 && list[0].source === 'TABLE' && list[0].severity === 'CRITICAL',
+      JSON.stringify(r.body));
+  };
+  const quietErrors = console.error;
+  console.error = () => {};
+  try {
+    aiReply = () => 'I cannot help with that.';
+    expectTableOnly(await checkRx(IBU), 'unparseable reply');
+    aiReply = () => ({ result: 'no conflicts key' });
+    expectTableOnly(await checkRx(IBU), 'wrong JSON shape');
+    aiReply = () => 'HTTP500';
+    expectTableOnly(await checkRx(IBU), 'provider HTTP 500');
+
+    aiReply = () => new Promise((r) => setTimeout(() => r({ conflicts: [] }), 4000));
+    const slowStart = Date.now();
+    const slow = await checkRx(IBU);
+    const slowMs = Date.now() - slowStart;
+    expectTableOnly(slow, 'provider slower than AI_TIMEOUT_MS');
+    ok(`  gave up within the timeout (${slowMs} ms)`, slowMs < 3000);
+
+    process.env.AI_BASE_URL = 'http://127.0.0.1:1/v1';
+    expectTableOnly(await checkRx(IBU), 'unreachable host');
+    process.env.AI_BASE_URL = `http://127.0.0.1:${fakeAi.address().port}/v1`;
+  } finally {
+    console.error = quietErrors;
+  }
+
+  aiRequests = [];
+  process.env.AI_ENABLED = 'false';
+  expectTableOnly(await checkRx(IBU), 'AI_ENABLED=false');
+  ok('  and the provider is never called', aiRequests.length === 0);
+
+  process.env.AI_ENABLED = 'true';
+  process.env.AI_PROVIDER = 'no-such-provider';
+  console.warn = () => {};
+  expectTableOnly(await checkRx(IBU), 'unknown AI_PROVIDER');
+  process.env.AI_PROVIDER = 'openai-compatible';
+  delete process.env.AI_API_KEY;
+  expectTableOnly(await checkRx(IBU), 'provider missing its key');
+
+  await new Promise((r) => fakeAi.close(r));
 
   // ── cleanup ────────────────────────────────────────────────
   await prisma.interactionCheck.deleteMany({ where: { patient_id: { in: patientIds } } });

@@ -8,13 +8,13 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AI_DRUG_INTERACTION_PLAN.md    # cross-clinic medication conflict detector — Phase 1 done, 2-4 pending
+├── AI_DRUG_INTERACTION_PLAN.md    # cross-clinic medication conflict detector — Phases 1-4 built
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
 ├── .claude/launch.json            # local preview servers: web (:5000 debug), web-doctor (:5001 profile build)
 ├── DEVLOG.md                      # temporary log of the 2026-09-11 clinic-side/PC work
-├── README.md                      # project overview (still describes GCP stack)
+├── README.md                      # project overview, status, setup, testing (rewritten 2026-09-13)
 ├── START_HERE.md, QUICK_START.md, SUMMARY.txt
 ├── FIREBASE_CREDENTIALS_SETUP.md, REPLACE_FIREBASE_CREDENTIALS.md, QUICK_FIREBASE_SETUP.txt
 ├── ENABLE_ANONYMOUS_AUTH.md, GUEST_LOGIN_SETUP.md
@@ -27,7 +27,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │
 ├── backend/                       # Node.js + Express REST API
 │   ├── server.js                  # entry point; mounts /api, serves /uploads statically
-│   ├── package.json               # express, prisma 7, @prisma/adapter-pg, firebase-admin, multer
+│   ├── package.json               # express, prisma 7, @prisma/adapter-pg, firebase-admin, multer;
+│   │                              # optional @aws-sdk/client-bedrock-runtime + client-sagemaker-runtime
 │   ├── prisma.config.ts           # Prisma 7 config (DATABASE_URL lives here, not in schema)
 │   ├── Dockerfile, .dockerignore  # node:22-slim image; secrets/uploads excluded
 │   ├── docker-compose.yml         # local Postgres 16 (migrant-clinic-db, :5432, volume migrant_clinic_pgdata)
@@ -55,9 +56,14 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── authorizePatientAccess.js
 │   │   ├── upload.js              # multer local-disk storage, 5 MB, PDF/PNG/JPG/WEBP
 │   │   ├── errorHandler.js, notFound.js
+│   ├── prompts/
+│   │   └── drug-interaction.md    # LLM prompt for the AI leg (system / ---USER--- / {{placeholders}})
 │   ├── services/
-│   │   └── interactionChecker.js  # drug conflict detector: new-vs-active (cross-clinic) AND
-│   │                              # new-vs-new in the same visit; curated table, AI leg = Phase 4
+│   │   ├── interactionChecker.js  # drug conflict detector: new-vs-active (cross-clinic) AND
+│   │   │                          # new-vs-new in the same visit; curated table + optional AI leg (fails open)
+│   │   └── ai/
+│   │       ├── index.js           # provider registry (AI_PROVIDER), timeout, prompt render, JSON parse
+│   │       └── providers/         # openaiCompatible.js (fetch), bedrock.js, sagemaker.js (lazy AWS SDKs)
 │   ├── prisma/
 │   │   ├── schema.prisma          # + DrugInteraction, InteractionCheck, InteractionSeverity
 │   │   └── migrations/            # 20260810170839_init_schema, 20260910082706,
@@ -69,8 +75,9 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   ├── scripts/                   # seed-*.js, seed-test-users.sql, set-user-role.js,
 │   │   │                          # generate-test-token.js, get-test-tokens.js, list-ids.js
 │   │   ├── seed-drug-interactions.js  # 56 curated interaction pairs (idempotent upsert)
-│   │   └── test-interactions.js   # drug-interaction regression suite: 80 assertions over real
-│   │                              # HTTP, Firebase stubbed — needs no device or service account
+│   │   ├── test-interactions.js   # drug-interaction regression suite: 112 assertions over real
+│   │   │                          # HTTP, Firebase stubbed, fake AI provider in-process
+│   │   └── test-ai-provider.js    # smoke-tests whichever AI provider .env configures (no DB)
 │   ├── postman/                   # API collection + environment
 │   ├── models/README.md
 │   └── uploads/reports/           # local uploaded reports (1 test PDF)

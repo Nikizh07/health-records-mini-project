@@ -1,6 +1,6 @@
 # Plan: AI Cross-Clinic Medication Conflict Detector
 
-**Status: Phases 1-3 complete, plus the same-visit gap closed (2026-09-13). Phase 4 pending.**
+**Status: all four phases built (Phase 4 on 2026-09-13). Phase 4 is verified against fake providers only; a real model run is still to do.**
 Approved 2026-09-12; Phase 4 revised the same day to be provider-agnostic.
 
 ## Context
@@ -74,7 +74,7 @@ feature, and Phase 4 can slip without stranding half-built work.
 | 1 | ✅ **Done** — schema + deterministic checker + check endpoint | — | none |
 | 2 | ✅ **Done** — audit wiring into record creation | 1 | none |
 | 3 | ✅ **Done** — Flutter banner + override UI + tests | 2 | none |
-| 4 | Pluggable AI layer + prompt file | 1 | one AI endpoint (any) |
+| 4 | ✅ **Built** — pluggable AI layer + prompt file (real-model check pending) | 1 | one AI endpoint (any) |
 
 ---
 
@@ -471,7 +471,7 @@ cover the logic and the wording, not how it actually looks on screen.
 
 ---
 
-## Phase 4 — Pluggable AI layer
+## Phase 4 — Pluggable AI layer ✅ BUILT
 
 Goal: catch brand names, misspellings and off-table pairs, through **whatever AI endpoint you point it
 at** — and never become a hard dependency.
@@ -630,6 +630,61 @@ SageMaker, the ECS **task role** needs `bedrock:InvokeModel` / `sagemaker:Invoke
 > value). Finally set `AI_ENABLED=false` and confirm the endpoint still returns 200 with table-only
 > conflicts.
 
+### Phase 4 outcome (2026-09-13)
+
+| File | Notes |
+|---|---|
+| `prompts/drug-interaction.md` | system and user halves split by `---USER---` |
+| `services/ai/index.js` | registry, `isAiEnabled()`, `complete()`, **and** prompt rendering and JSON parsing |
+| `services/ai/providers/openaiCompatible.js`, `bedrock.js`, `sagemaker.js` | the adapter contract as planned; AWS SDKs required lazily |
+| `services/interactionChecker.js` | AI leg, attribution, merge |
+| `scripts/test-ai-provider.js` | provider smoke test; no DB needed |
+| `scripts/test-interactions.js` | +32 Phase 4 assertions against an in-process fake provider (112 total) |
+| `.env.example`, `package.json` | `AI_*` vars; both AWS SDKs under `optionalDependencies` |
+| `AWS_MIGRATION_PLAN.md` §1 | task-role permissions for Bedrock / SageMaker |
+
+Departures from the plan:
+
+- **`promptLoader.js` and `parseJson.js` were folded into `services/ai/index.js`.** Each was ~30 lines
+  with one caller, so separate files added nothing. The provider files stay separate, as that is the
+  extension point.
+- **The model only names the pair; the server supplies everything else.** `clinic_name`,
+  `prescribed_on`, `scope` and `confidence` come from the patient's real records. The model's names
+  are matched back through `normaliseDrugName`, in either order, and a pair naming a drug that is in
+  neither list is dropped. So a hallucinated drug can't reach the banner, and the clinic and date can
+  never be invented. For this to work the prompt tells the model to copy names exactly.
+- **AI-only conflicts carry `source: 'AI'`.** Where both legs hit a pair it stays `TABLE`, keeping the
+  table's severity with the model's explanation. The app doesn't read `source`, so no Flutter change was
+  needed.
+- **The timeout is also enforced around the adapter** (`Promise.race`), not just passed as a `signal`, so
+  an adapter that ignores the signal still can't hold a save open.
+- **The whole curated table goes into the prompt** (56 rows, ~2k tokens). Marked with a `ponytail:`
+  comment: filter it to the drugs involved once it grows into the hundreds.
+- **SageMaker sends `do_sample: false` rather than `temperature: 0`**, because TGI rejects a zero
+  temperature.
+
+Verified:
+
+- `scripts/test-interactions.js` passes 112/112 over real HTTP against the local DB. Phases 1-3 run with
+  `AI_ENABLED=false` forced, so a key in `.env` can't change their results. The Phase 4 assertions cover:
+  - Brufen caught with the clinic and date taken from the record, and `ai_provider` stored on the row.
+  - The request shape: URL, bearer key, JSON mode, temperature 0, and a prompt that includes the
+    cross-clinic med and the table but not expired courses.
+  - Table severity winning over the model's, with the model's prose kept.
+  - Hallucinated drugs, bad severities and malformed entries dropped.
+  - JSON inside prose and code fences parsed.
+  - A same-visit pair only the model knows about.
+  - Fail-open on each failure mode, every time with 200, table-only results and `ai_available: false`:
+    unparseable reply, wrong shape, HTTP 500, slower than the timeout (gave up at ~1.5 s),
+    unreachable host, `AI_ENABLED=false` (provider never called), unknown `AI_PROVIDER`, missing key.
+- `scripts/test-ai-provider.js` passes through all three adapters against local fakes: OpenAI-compatible
+  over HTTP, Bedrock `Converse` over h2c via `AWS_ENDPOINT_URL`, and SageMaker `InvokeEndpoint`. With no
+  config it exits 1 with a clear message; a blackholed host times out at the configured 1000 ms.
+
+**Not done: no real model has been called.** No Ollama or API key is set up on this machine. The
+"Done when" above still needs two real providers, e.g. a local Ollama and one hosted key. Until then
+the prompt's quality, including whether a real model actually maps Brufen to ibuprofen, is unproven.
+
 ---
 
 ## Cross-phase verification
@@ -652,8 +707,8 @@ Run at the end, once all four phases are in:
 
 - ✅ `SNAPSHOT.md` — Phase 1 entries added (`services/interactionChecker.js`, `utils/drugName.js`,
   `utils/prescriptionWindow.js`, `scripts/seed-drug-interactions.js`, both new migrations), plus
-  `scripts/test-interactions.js`. Still to add after Phase 4: the `prompts/` and `services/ai/` trees
-  and `scripts/test-ai-provider.js`.
+  `scripts/test-interactions.js`. Phase 4 added the `prompts/` and `services/ai/` trees and
+  `scripts/test-ai-provider.js`.
 - ✅ `MEMORY.md` — dated notes recorded for Phase 1, Phase 2 and the same-visit fix.
 - Phase 3 will add no backend files, but `SNAPSHOT.md` should gain the Flutter banner widget and the
   new `record_service.dart` method, and `MEMORY.md` a note that the feature is finally reachable by a

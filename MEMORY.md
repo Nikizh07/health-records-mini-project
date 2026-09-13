@@ -27,12 +27,12 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - **The AI provider is pluggable, configured by env vars only** (2026-09-12). One adapter contract (`isConfigured()` + `complete({system,user})`) with three implementations: `openai-compatible` (plain `fetch`, no deps — covers OpenAI, Gemini's compat endpoint, Groq, OpenRouter, Ollama, vLLM, any custom URL), `bedrock`, and `sagemaker`. Adding a provider = one file + one registry line. AWS SDKs are `optionalDependencies`, lazily required.
 - **The prompt lives in `backend/prompts/drug-interaction.md`, not in code** — `{{placeholders}}`, split into system/user by a `---USER---` line, cached only in production so prompt edits need no restart.
 - Bedrock model ids are region-specific: get the exact id from `aws bedrock list-foundation-models --region ap-south-1 --by-provider meta`, never guess. SageMaker has no standard payload shape — the adapter targets HuggingFace TGI and the mapping is meant to be edited.
-- **Fails open by design**: if Bedrock is unreachable the save still proceeds, flagged `ai_available: false`, and the curated table still fires. Never block a clinic on an LLM outage.
+- **Fails open by design**: if the AI provider is unreachable the save still proceeds, flagged `ai_available: false`, and the curated table still fires. Never block a clinic on an LLM outage.
 - Conflicts warn but don't block; the doctor must give an override reason, and every check is stored in `interaction_checks` for audit.
-- **Status (2026-09-12): Phase 1 done** — schema (`drug_interactions`, `interaction_checks`, `InteractionSeverity`) + 2 migrations, `utils/drugName.js`, `utils/prescriptionWindow.js`, `services/interactionChecker.js`, `scripts/seed-drug-interactions.js` (56 curated pairs), and `POST /api/records/interaction-check`. Verified end to end against the local DB and over HTTP with a real doctor token; test rows cleaned up. Phases 2-4 (audit wiring, Flutter UI, AI layer) pending.
+- **Status (2026-09-12): Phase 1 done** — schema (`drug_interactions`, `interaction_checks`, `InteractionSeverity`) + 2 migrations, `utils/drugName.js`, `utils/prescriptionWindow.js`, `services/interactionChecker.js`, `scripts/seed-drug-interactions.js` (56 curated pairs), and `POST /api/records/interaction-check`. Verified end to end against the local DB and over HTTP with a real doctor token; test rows cleaned up. Phases 2-4 followed; see the changelog (Phase 4 on 2026-09-13).
 - Gotcha: `utils/drugName.js` `normaliseDrugName()` is the contract between the seeder and the checker. If one side changes how names are normalised and the other doesn't, lookups silently return nothing — there is no error.
 - Gotcha: an unparseable `duration` makes a prescription count as active for 90 days (`ASSUMED_ACTIVE_DAYS`) and marks the conflict `confidence: "ASSUMED"`. Deliberate: a false warning is cheaper than a missed one.
-- Known gap: the checker compares new drugs only against *existing* active ones, so two conflicting drugs prescribed in the **same visit** do not fire. Left open deliberately (outside the approved Phase 1 scope); closing it means including the new drugs on both sides of the pair loop in `findTableConflicts`.
+- ~~Known gap: same-visit pairs don't fire~~ — closed 2026-09-12.
 
 ## Known gotchas
 - `backend/config/firebase.js` falls back to Google ADC when the key file is missing. That will fail on AWS, and the key is dockerignored, so it must be injected as the `FIREBASE_SERVICE_ACCOUNT_JSON` secret.
@@ -45,6 +45,13 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-13: Drug interaction Phase 4 — the AI leg is built.** `backend/services/ai/` (registry + three adapters), `backend/prompts/drug-interaction.md`, `scripts/test-ai-provider.js`. The AI leg runs only when `AI_*` is set in `backend/.env`. The local `.env` has none, so the running app still behaves table-only.
+  - **The model names only the pair.** Clinic, date, scope and confidence come from the patient's records. A pair naming a drug that isn't in either list is dropped, and table severity beats the model's.
+  - **Any AI failure is a fail-open** (`ai_available: false`, table results stand): timeouts, HTTP errors, unparseable output, an unknown `AI_PROVIDER` or a missing key.
+  - `scripts/test-interactions.js` now forces `AI_ENABLED=false` for Phases 1-3 and tests Phase 4 against an in-process fake provider: 112/112.
+  - **Not done: no real model has been called** (no Ollama or key on this machine). Next: `node scripts/test-ai-provider.js` against a real provider, then the Brufen check through the API.
+  - **Gotcha:** the Bedrock SDK speaks HTTP/2, so a fake HTTP/1 endpoint gives "Protocol error". Use an h2c server with `AWS_ENDPOINT_URL`. The SageMaker SDK is fine on HTTP/1.
+  - **Gotcha:** HuggingFace TGI rejects `temperature: 0`; the SageMaker adapter sends `do_sample: false` instead.
 - **2026-09-13: Drug interaction Phase 3 — the doctor can finally see it.** The visit form runs the pre-flight check and sends `check_id`, so Phases 1-2 stop being dead code.
   - `record_service.dart`: new `checkDrugInteractions()`; `createMedicalRecord` takes `checkId` / `overrideReason`.
   - `doctor_screens.dart`: `_InteractionBanner` + `_ConflictTile` above the save button, a reason field, and the button turning red and relabelling to **Save Anyway**. The banner branches on `scope` — a `SAME_VISIT` conflict reads "Both drugs are in this prescription" instead of naming a clinic.

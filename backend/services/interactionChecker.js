@@ -5,10 +5,11 @@
 // Checks the drugs a doctor is about to prescribe against everything the
 // patient is still taking, from EVERY clinic in the network.
 //
-// Two knowledge sources are planned (see AI_DRUG_INTERACTION_PLAN.md):
+// Two knowledge sources (see AI_DRUG_INTERACTION_PLAN.md):
 //   1. the curated `drug_interactions` table — deterministic, no network,
 //      always runs. This is the load-bearing safety component.
-//   2. an optional AI leg — added in Phase 4 at the seam marked below.
+//   2. an optional AI leg (services/ai) that catches brand names,
+//      misspellings and pairs the table does not list.
 //
 // Because the AI leg is allowed to fail open, nothing here may depend on it.
 // ============================================================
@@ -18,6 +19,7 @@
 const prisma = require('../config/prisma');
 const { normaliseDrugName, orderPair } = require('../utils/drugName');
 const { isLikelyActive } = require('../utils/prescriptionWindow');
+const { isAiEnabled, complete, renderPrompt, parseConflicts } = require('./ai');
 
 // Most dangerous first — the banner shows them in this order.
 const SEVERITY_RANK = {
@@ -221,23 +223,144 @@ async function checkInteractions({ patientId, newPrescriptions }) {
 
   const activeMeds = await getActiveMedications(patientId);
   const tableConflicts = await findTableConflicts(newDrugs, activeMeds);
+  const tableOnly = { conflicts: sortBySeverity(tableConflicts), ai_available: false, ai_provider: null };
 
-  // ── AI leg plugs in here (Phase 4) ───────────────────────────
-  // Call the provider adapter with { activeMeds, newDrugs, curated table },
-  // merge its conflicts with tableConflicts by normalised pair (table severity
-  // wins), and set ai_available / ai_provider from the result.
-  // On ANY failure it must return the table conflicts unchanged — fail open.
-  // ─────────────────────────────────────────────────────────────
+  if (!isAiEnabled()) return tableOnly;
 
-  return {
-    conflicts: sortBySeverity(tableConflicts),
-    ai_available: false,
-    ai_provider: null,
-  };
+  try {
+    const { conflicts, provider } = await findAiConflicts(newDrugs, activeMeds);
+    return {
+      conflicts: sortBySeverity(mergeConflicts(tableConflicts, conflicts)),
+      ai_available: true,
+      ai_provider: provider,
+    };
+  } catch (err) {
+    // Fail open: the table result stands and the check is marked AI-unchecked.
+    console.error('❌ AI interaction check failed:', err.message);
+    return tableOnly;
+  }
+}
+
+// ── AI leg ───────────────────────────────────────────────────
+
+const bulletList = (lines) => (lines.length ? lines.map((l) => `- ${l}`).join('\n') : '(none)');
+
+/**
+ * Renders the drug-interaction prompt. Exported so scripts/test-ai-provider.js
+ * renders exactly what production sends.
+ */
+function renderInteractionPrompt(newDrugs, activeMeds, tableRows) {
+  return renderPrompt('drug-interaction', {
+    activeMedications: bulletList(
+      activeMeds.map((m) => [m.medicine_name, m.dosage, m.duration && `for ${m.duration}`].filter(Boolean).join(', '))
+    ),
+    newPrescriptions: bulletList(newDrugs.map((d) => d.raw)),
+    interactionTable: bulletList(
+      tableRows.map((r) => `${r.drug_a} + ${r.drug_b}: ${r.severity}. ${r.mechanism}`)
+    ),
+  });
+}
+
+async function findAiConflicts(newDrugs, activeMeds) {
+  // ponytail: sends the whole curated table (56 rows, ~2k tokens); filter it
+  // to the drugs involved once it grows into the hundreds.
+  const tableRows = await prisma.drugInteraction.findMany({
+    orderBy: [{ drug_a: 'asc' }, { drug_b: 'asc' }],
+  });
+
+  const { system, user } = renderInteractionPrompt(newDrugs, activeMeds, tableRows);
+  const { text, provider } = await complete({ system, user, temperature: 0 });
+
+  return { conflicts: attributeAiConflicts(parseConflicts(text), newDrugs, activeMeds), provider };
+}
+
+/**
+ * Turns the model's name pairs into full conflict objects. The clinic, date,
+ * scope and confidence come from the patient's real data, never from the
+ * model, and a pair naming a drug that is in neither list is dropped.
+ */
+function attributeAiConflicts(aiConflicts, newDrugs, activeMeds) {
+  const newByName = new Map(newDrugs.map((d) => [d.name, d]));
+  const activeByName = new Map();
+  for (const med of activeMeds) {
+    if (!activeByName.has(med.name)) activeByName.set(med.name, med); // newest first
+  }
+
+  const conflicts = [];
+
+  for (const c of aiConflicts) {
+    const x = normaliseDrugName(c.new_drug);
+    const y = normaliseDrugName(c.existing_drug);
+    if (!x || !y || x === y) continue;
+
+    // The model may swap which side is new, so try both orientations.
+    let newDrug;
+    let existing;
+    if (newByName.has(x) && activeByName.has(y)) [newDrug, existing] = [newByName.get(x), activeByName.get(y)];
+    else if (newByName.has(y) && activeByName.has(x)) [newDrug, existing] = [newByName.get(y), activeByName.get(x)];
+
+    const base = {
+      severity: c.severity,
+      explanation: c.explanation,
+      suggested_alternative: c.suggested_alternative,
+      source: 'AI',
+    };
+
+    if (existing) {
+      conflicts.push({
+        ...base,
+        new_drug: newDrug.raw,
+        existing_drug: existing.medicine_name,
+        clinic_name: existing.clinic_name,
+        prescribed_on: existing.visit_date,
+        confidence: existing.confidence,
+        scope: 'EXISTING',
+      });
+    } else if (newByName.has(x) && newByName.has(y)) {
+      conflicts.push({
+        ...base,
+        new_drug: newByName.get(x).raw,
+        existing_drug: newByName.get(y).raw,
+        clinic_name: null,
+        prescribed_on: null,
+        confidence: 'CERTAIN',
+        scope: 'SAME_VISIT',
+      });
+    }
+  }
+
+  return conflicts;
+}
+
+/**
+ * One conflict per unordered drug pair. Where the table and the model both
+ * flag a pair, the table's severity wins and the model's prose is kept.
+ */
+function mergeConflicts(tableConflicts, aiConflicts) {
+  const pairKey = (c) => orderPair(normaliseDrugName(c.new_drug), normaliseDrugName(c.existing_drug)).join('|');
+  const merged = new Map(tableConflicts.map((c) => [pairKey(c), c]));
+
+  for (const ai of aiConflicts) {
+    const key = pairKey(ai);
+    const known = merged.get(key);
+    if (!known) {
+      merged.set(key, ai);
+    } else if (known.source === 'TABLE') {
+      merged.set(key, {
+        ...known,
+        explanation: ai.explanation,
+        suggested_alternative: ai.suggested_alternative || known.suggested_alternative,
+      });
+    }
+  }
+
+  return [...merged.values()];
 }
 
 module.exports = {
   checkInteractions,
   getActiveMedications,
   findTableConflicts,
+  renderInteractionPrompt,
+  parseConflicts,
 };
