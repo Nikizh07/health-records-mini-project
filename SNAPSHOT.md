@@ -9,6 +9,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
 ├── AI_DRUG_INTERACTION_PLAN.md    # cross-clinic medication conflict detector — Phases 1-4 built
+├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — not implemented yet
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file

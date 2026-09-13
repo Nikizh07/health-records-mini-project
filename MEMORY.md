@@ -34,6 +34,30 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Gotcha: an unparseable `duration` makes a prescription count as active for 90 days (`ASSUMED_ACTIVE_DAYS`) and marks the conflict `confidence: "ASSUMED"`. Deliberate: a false warning is cheaper than a missed one.
 - ~~Known gap: same-visit pairs don't fire~~ — closed 2026-09-12.
 
+## Planned: registration, RBAC and patient consent
+- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: plan only, no code changes.**
+- Split into 8 phases, one migration per phase (2026-09-13):
+  1. identity hardening
+  2. roles + permission table
+  3. staff onboarding API
+  4. staff sign-in UI
+  5. patient sign-in + desk registration
+  6. receptionist front desk
+  7. consent API
+  8. consent UI
+- Phases 5 and 7 only need Phase 2. Start with Phase 1.
+- Decisions:
+  - Doctors join by clinic-admin invite **or** by self-applying with a registration number (PENDING until approved).
+  - Consent is needed only outside a care link (an appointment at the doctor's clinic within ±30 days, or a record the doctor wrote), with an audited emergency override.
+  - Patients without the app use a 6-digit share code.
+  - Guest login stays in debug builds only.
+- New roles `RECEPTIONIST` and `CLINIC_ADMIN`. A single permission table in `backend/config/permissions.js` is sent to the app via `/me`. Receptionists and admins never read records.
+- Holes found in current code, fixed by the plan:
+  - `createPatient` trusts a body `phone`.
+  - Doctor linking matches the last 10 phone digits.
+  - Any DOCTOR/ADMIN reads any patient's history.
+  - `createMedicalRecord` falls back to `prisma.doctor.findFirst()` for an ADMIN.
+
 ## Known gotchas
 - `backend/config/firebase.js` falls back to Google ADC when the key file is missing. That will fail on AWS, and the key is dockerignored, so it must be injected as the `FIREBASE_SERVICE_ACCOUNT_JSON` secret.
 - `backend/config/db.js` is unused. `config/prisma.js` is the real DB client.
