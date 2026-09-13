@@ -50,7 +50,7 @@ const APPOINTMENT_INCLUDE = {
 
 /**
  * Helper: Derives patient ID for the authenticated user.
- * Checks cached req.user.patient_id first, then queries database by firebase_uid or phone.
+ * Checks cached req.user.patient_id first, then queries database by firebase_uid.
  */
 async function getAuthenticatedPatientId(req) {
   if (req.user?.patient_id) {
@@ -72,17 +72,8 @@ async function getAuthenticatedPatientId(req) {
     return user.patient.id;
   }
 
-  // 2. Fallback check patient record by phone
-  if (req.user?.phone_number) {
-    const patient = await prisma.patient.findUnique({
-      where: { phone: req.user.phone_number },
-    });
-    if (patient) {
-      req.user.patient_id = patient.id;
-      return patient.id;
-    }
-  }
-
+  // No phone fallback: a patient row with a matching phone is not proof it
+  // belongs to this account. Only the users → patients link counts.
   return null;
 }
 
@@ -330,30 +321,16 @@ async function getAppointments(req, res, next) {
 
     // Role-based scope
     if (userRole === 'DOCTOR') {
-      // If user is doctor, restrict to their own doctor record if available
-      const doctorRecord = await prisma.doctor.findFirst({
-        where: {
-          OR: [
-            ...(req.user.doctor_id ? [{ id: req.user.doctor_id }] : []),
-            ...(req.user.db_id ? [{ user_id: req.user.db_id }] : []),
-            ...(req.user.phone_number ? [{ phone: req.user.phone_number }] : []),
-          ],
-        },
-      });
-
-      if (doctorRecord) {
-        whereClause.doctor_id = doctorRecord.id;
-      } else if (doctor_id) {
-        // Fallback to explicit query param if doctor profile lookup isn't linked yet
-        if (!UUID_REGEX.test(doctor_id)) {
-          return res.status(400).json({
-            success: false,
-            error: 'Bad Request',
-            message: 'Query parameter "doctor_id" must be a valid UUID.',
-          });
-        }
-        whereClause.doctor_id = doctor_id;
+      // A doctor only ever sees their own schedule. No linked profile means
+      // no schedule — never "no filter", which would list every appointment.
+      if (!req.user.doctor_id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'No doctor profile is linked to this account.',
+        });
       }
+      whereClause.doctor_id = req.user.doctor_id;
     } else if (userRole === 'ADMIN') {
       // Admin can filter by any doctor_id
       if (doctor_id) {

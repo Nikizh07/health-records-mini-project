@@ -35,7 +35,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - ~~Known gap: same-visit pairs don't fire~~ — closed 2026-09-12.
 
 ## Planned: registration, RBAC and patient consent
-- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: plan only, no code changes.**
+- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phase 1 done (2026-09-13); next is Phase 2.**
 - Split into 8 phases, one migration per phase (2026-09-13):
   1. identity hardening
   2. roles + permission table
@@ -69,6 +69,22 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-13: Auth/RBAC Phase 1 — identity hardening.** No new features; the holes are closed.
+  - `middleware/authenticate.js`: the role comes **only** from the `users` row. A signed-in Firebase user with no row has `role: null` and gets 403 on every role-gated route (they used to count as PATIENT, and a `role` claim in the token was trusted). `req.user.phone_number` is now the verified token phone only, with no DB fallback. It also attaches `email_verified` and `sign_in_provider`.
+  - Anonymous tokens get 401 when `NODE_ENV=production`.
+  - **A DB error in `authenticate` is now a 500, not a 401.** The app ends the session on 401/403, so a DB outage used to log everyone out.
+  - New `utils/phone.js` `toE164()`: a bare 10-digit number gets +91; anything else needs its country code.
+    - `createPatient` takes the phone only from the token; the body `phone` is ignored.
+    - Doctor linking in `/patients/me` is an exact E.164 match (the last-10-digit match is gone).
+    - `POST/PUT /doctors` store E.164 and refuse numbers without a country code.
+  - Phone-based identity fallbacks removed: `getAuthenticatedDoctorId`, `getAuthenticatedPatientId`, and the phone `OR` in `getAppointments`.
+  - `createMedicalRecord`: the `doctor.findFirst()` fallback is gone.
+    - A **DOCTOR always saves under their own profile**: a different body `doctor_id` gets 403. This was not in the plan but is the same hole.
+    - An ADMIN must name the doctor (body `doctor_id` or the appointment's doctor).
+  - `getAppointments`: a DOCTOR with no linked profile gets 403. Before, they got **every** appointment unfiltered (not in the plan, found while tracing).
+  - App: "Continue as guest" is shown only when `!kReleaseMode`. This deviates from the plan's `kDebugMode`, so the `web-doctor` **profile** build keeps it for local testing.
+  - Tests: new `scripts/test-auth-rbac.js`, 35/35. Against the pre-Phase-1 code, 13 of them fail, including an **unregistered user being able to write medical records**. `test-interactions.js` 112/112; `flutter analyze` clean; `flutter test` 12 passed, 2 skipped.
+  - Not yet done: a manual click-through by the user (test doctor `+919999900001` logs in and saves a visit; guest patient flow on :5000).
 - **2026-09-13: Root docs tidied into `thinking-archive/`.**
   - Moved there: the stale Firebase/guest setup notes (`START_HERE`, `QUICK_START`, `SUMMARY`, `*FIREBASE*`, `ENABLE_ANONYMOUS_AUTH`, `GUEST_LOGIN_SETUP`, `check-firebase-config.sh`), `DEVLOG.md`, `doctor-creds.txt` and the built `AI_DRUG_INTERACTION_PLAN.md`.
   - The root keeps `README`, `CLAUDE`, `MEMORY`, `SNAPSHOT` and the two open plans (AWS, auth/RBAC).

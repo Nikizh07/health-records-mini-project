@@ -87,17 +87,8 @@ async function getAuthenticatedDoctorId(req) {
     return user.doctor.id;
   }
 
-  // 2. Fallback check doctor record by phone
-  if (req.user?.phone_number) {
-    const doctor = await prisma.doctor.findUnique({
-      where: { phone: req.user.phone_number },
-    });
-    if (doctor) {
-      req.user.doctor_id = doctor.id;
-      return doctor.id;
-    }
-  }
-
+  // No phone fallback: an unlinked Doctor row is not proof of identity.
+  // Doctors get linked once, in GET /patients/me.
   return null;
 }
 
@@ -135,14 +126,25 @@ async function createMedicalRecord(req, res, next) {
     } = body;
 
     // ── 1. Validate Doctor Identity ──────────────────────────
+    // A DOCTOR always saves under their own profile. Only an ADMIN may name
+    // the doctor (body doctor_id, or the appointment's doctor).
+    const userRole = (req.user?.role || '').toUpperCase();
     let doctor_id = bodyDoctorId ? String(bodyDoctorId).trim() : null;
-    const userRole = (req.user?.role || 'PATIENT').toUpperCase();
 
-    if (!doctor_id) {
-      doctor_id = await getAuthenticatedDoctorId(req);
+    if (userRole === 'DOCTOR') {
+      const ownDoctorId = await getAuthenticatedDoctorId(req);
+      if (!ownDoctorId || (doctor_id && doctor_id !== ownDoctorId)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: ownDoctorId
+            ? 'Doctors can only save visit records under their own profile.'
+            : 'No doctor profile is linked to this account.',
+        });
+      }
+      doctor_id = ownDoctorId;
     }
 
-    // Fallback: If appointment_id is provided, derive doctor_id from the appointment
     if (!doctor_id && appointment_id && UUID_REGEX.test(String(appointment_id).trim())) {
       const appt = await prisma.appointment.findUnique({
         where: { id: String(appointment_id).trim() },
@@ -153,13 +155,8 @@ async function createMedicalRecord(req, res, next) {
       }
     }
 
-    // Fallback: If still not found and user has DOCTOR/ADMIN role, find any matching doctor or first doctor
-    if (!doctor_id && (userRole === 'DOCTOR' || userRole === 'ADMIN')) {
-      const firstDoc = await prisma.doctor.findFirst();
-      if (firstDoc) {
-        doctor_id = firstDoc.id;
-      }
-    }
+    // No "first doctor in the table" fallback: a visit must be saved under the
+    // doctor who saw the patient. An ADMIN without a doctor profile passes doctor_id.
 
     if (!doctor_id || !UUID_REGEX.test(doctor_id)) {
       return res.status(400).json({

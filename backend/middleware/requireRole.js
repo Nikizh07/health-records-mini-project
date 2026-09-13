@@ -27,7 +27,8 @@ function requireRole(...allowedRoles) {
       });
     }
 
-    const userRole = (req.user.role || 'PATIENT').toUpperCase();
+    // No users row yet → no role → nothing role-gated is allowed.
+    const userRole = (req.user.role || '').toUpperCase();
     const normalizedAllowedRoles = allowedRoles.map((role) => role.toUpperCase());
 
     // 2. Verify authorization
@@ -35,7 +36,7 @@ function requireRole(...allowedRoles) {
       return res.status(403).json({
         success: false,
         error: 'Forbidden',
-        message: `Access denied. Role "${userRole}" is not authorized for this action. Required role(s): ${allowedRoles.join(', ')}.`,
+        message: `Access denied. Role "${userRole || 'none (not registered)'}" is not authorized for this action. Required role(s): ${allowedRoles.join(', ')}.`,
       });
     }
 

@@ -191,31 +191,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
-
-                    const Row(
-                      children: [
-                        Expanded(child: Divider()),
-                        Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 12),
-                          child: Text('or', style: muted),
-                        ),
-                        Expanded(child: Divider()),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    OutlinedButton.icon(
-                      onPressed: authState.isLoading
-                          ? null
-                          : () => ref.read(authNotifierProvider.notifier).signInAsGuest(),
-                      icon: const Icon(Icons.person_outline),
-                      label: const Text('Continue as guest'),
-                    ),
-                    if (kDebugMode) ...[
+                    // Guest login is for local testing only: hidden in release
+                    // builds (debug + the profile `web-doctor` build keep it),
+                    // and the backend refuses anonymous tokens in production.
+                    if (!kReleaseMode) ...[
+                      const SizedBox(height: 20),
+                      const Row(
+                        children: [
+                          Expanded(child: Divider()),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12),
+                            child: Text('or', style: muted),
+                          ),
+                          Expanded(child: Divider()),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      OutlinedButton.icon(
+                        onPressed: authState.isLoading
+                            ? null
+                            : () => ref.read(authNotifierProvider.notifier).signInAsGuest(),
+                        icon: const Icon(Icons.person_outline),
+                        label: const Text('Continue as guest'),
+                      ),
                       const SizedBox(height: 10),
                       const Text(
-                        'Debug build: use guest mode if SMS verification is not configured.',
+                        'Test build: use guest mode if SMS verification is not configured.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                       ),

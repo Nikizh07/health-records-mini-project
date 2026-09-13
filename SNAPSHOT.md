@@ -8,7 +8,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, not implemented yet
+├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phase 1 done
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
@@ -73,6 +73,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │                              # 20260912122022_add_drug_interactions, 20260912122039_add_history_indexes
 │   ├── utils/
 │   │   ├── healthId.js            # MWH-XXXXXX health ID generator
+│   │   ├── phone.js               # toE164(): every stored/matched phone goes through it (+91 default)
 │   │   ├── drugName.js            # normalises free-text medicine names for table lookup
 │   │   └── prescriptionWindow.js  # infers whether a prescription is still active
 │   ├── scripts/                   # seed-*.js, seed-test-users.sql, set-user-role.js,
@@ -80,6 +81,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── seed-drug-interactions.js  # 56 curated interaction pairs (idempotent upsert)
 │   │   ├── test-interactions.js   # drug-interaction regression suite: 112 assertions over real
 │   │   │                          # HTTP, Firebase stubbed, fake AI provider in-process
+│   │   ├── test-auth-rbac.js      # auth/RBAC regression suite (AUTH_RBAC_CONSENT_PLAN.md), one section per phase;
+│   │   │                          # same stubbed-Firebase harness as test-interactions.js
 │   │   └── test-ai-provider.js    # smoke-tests whichever AI provider .env configures (no DB)
 │   ├── postman/                   # API collection + environment
 │   ├── models/README.md

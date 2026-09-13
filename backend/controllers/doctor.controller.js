@@ -14,6 +14,7 @@
 'use strict';
 
 const prisma = require('../config/prisma');
+const { toE164 } = require('../utils/phone');
 
 // Reusable UUID format validator
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -60,11 +61,13 @@ async function createDoctor(req, res, next) {
       });
     }
 
-    if (!phone || typeof phone !== 'string' || phone.trim().length < 5) {
+    // Stored as E.164 so the doctor's first phone sign-in links to this row.
+    const e164Phone = toE164(phone);
+    if (!e164Phone) {
       return res.status(400).json({
         success: false,
         error: 'Bad Request',
-        message: 'Field "phone" is required (e.g. "+60123456789").',
+        message: 'Field "phone" is required, with its country code (e.g. "+60123456789").',
       });
     }
 
@@ -86,7 +89,7 @@ async function createDoctor(req, res, next) {
         clinic_id,
         name:           name.trim(),
         specialization: specialization.trim(),
-        phone:          phone.trim(),
+        phone:          e164Phone,
       },
       include: DOCTOR_INCLUDE,
     });
@@ -231,8 +234,16 @@ async function updateDoctor(req, res, next) {
     if (specialization && typeof specialization === 'string' && specialization.trim().length >= 2) {
       updateData.specialization = specialization.trim();
     }
-    if (phone && typeof phone === 'string' && phone.trim().length >= 5) {
-      updateData.phone = phone.trim();
+    if (phone !== undefined) {
+      const e164Phone = toE164(phone);
+      if (!e164Phone) {
+        return res.status(400).json({
+          success: false,
+          error: 'Bad Request',
+          message: 'Field "phone" must include its country code (e.g. "+60123456789").',
+        });
+      }
+      updateData.phone = e164Phone;
     }
 
     // If clinic_id is being changed, verify the new clinic exists first

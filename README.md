@@ -38,7 +38,7 @@ This project closes that gap with a **shared, multi-clinic health record system*
 
 **For patients**
 - **Portable health ID**: every patient gets an ID like `MWH-XXXXXX` that works at every registered clinic
-- **Phone OTP or guest login** via Firebase Auth, with no passwords to manage
+- **Phone OTP login** via Firebase Auth, with no passwords to manage (guest login only in test builds)
 - **Appointments at any clinic**: book, reschedule or cancel. Clinics are listed nearest first.
 - **Health records**: diagnoses, prescriptions, visit notes and attached reports from every clinic in one place
 - **Multilingual UI** in English, Hindi and Tamil
@@ -218,10 +218,11 @@ Set these in `backend/.env` (template: `backend/.env.example`):
 cd mobile_app && flutter analyze && flutter test
 ```
 ```bash
-cd backend && node scripts/test-interactions.js
+cd backend && node scripts/test-interactions.js && node scripts/test-auth-rbac.js
 ```
 - `flutter test` covers the role gate and the doctor/admin screens. It uses the real router with fake services.
 - `test-interactions.js` runs 112 drug interaction checks against the real API and database. Firebase and the AI provider are faked, so it needs no device or credentials, and it removes its own test data.
+- `test-auth-rbac.js` covers sign-in and role rules the same way: role from the database only, phone only from the verified token, doctors linked by exact phone, visits saved under the right doctor, guests refused in production.
 - `node scripts/test-ai-provider.js` sends one canned case to whichever AI provider `backend/.env` configures and prints the reply.
 
 ---

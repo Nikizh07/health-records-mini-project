@@ -9,6 +9,7 @@
 
 const prisma = require('../config/prisma');
 const { generateUniqueHealthId } = require('../utils/healthId');
+const { toE164 } = require('../utils/phone');
 
 /**
  * @route   POST /api/patients
@@ -17,7 +18,7 @@ const { generateUniqueHealthId } = require('../utils/healthId');
  */
 async function createPatient(req, res, next) {
   try {
-    const { name, dob, gender, language_pref, phone } = req.body;
+    const { name, dob, gender, language_pref } = req.body;
 
     // 1. Field Validations
     if (!name || typeof name !== 'string' || name.trim().length < 2) {
@@ -52,16 +53,18 @@ async function createPatient(req, res, next) {
       });
     }
 
-    // Phone number comes from verified Firebase Auth token, with fallback to request body.
+    // The phone comes ONLY from the verified Firebase token — never the body,
+    // or anyone could register against someone else's number.
     // Guest (anonymous) accounts have no phone; phone is unique + required in the
-    // schema, so give them a per-account placeholder instead of the body value.
-    const isGuest = req.user.firebase?.firebase?.sign_in_provider === 'anonymous';
-    const userPhone = req.user.phone_number || (isGuest ? `guest-${req.user.uid}` : phone);
+    // schema, so they get a per-account placeholder. authenticate() already
+    // refuses guests in production.
+    const isGuest = req.user.sign_in_provider === 'anonymous';
+    const userPhone = isGuest ? `guest-${req.user.uid}` : toE164(req.user.phone_number);
     if (!userPhone) {
       return res.status(400).json({
         success: false,
         error: 'Bad Request',
-        message: 'Phone number missing from authenticated user token and body.',
+        message: 'Your account has no verified phone number. Please sign in with your phone number first.',
       });
     }
 
@@ -144,11 +147,12 @@ async function getMyProfile(req, res, next) {
 
     // First sign-in of a doctor onboarded by an admin: the Doctor row exists
     // (matched by phone) but has no login yet. Link it instead of sending
-    // them to patient registration.
-    const phone = req.user.phone_number;
+    // them to patient registration. Exact E.164 match on the token's verified
+    // phone only: a partial match could hand a doctor account to a stranger.
+    const phone = toE164(req.user.phone_number);
     if (!user && phone) {
       const doctor = await prisma.doctor.findFirst({
-        where: { user_id: null, OR: [{ phone }, { phone: phone.slice(-10) }] },
+        where: { user_id: null, phone },
       });
       if (doctor) {
         user = await prisma.user.create({

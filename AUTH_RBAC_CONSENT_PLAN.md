@@ -1,6 +1,6 @@
 # Plan: Registration, RBAC and patient consent
 
-**Status (2026-09-13): plan only, no code changes.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
+**Status (2026-09-13): Phase 1 done. Phases 2–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
 
 ## Context
 
@@ -130,7 +130,7 @@ Every allowed read of patient data writes a `PatientAccessLog` row.
 
 # Phases
 
-## Phase 1: Identity hardening
+## Phase 1: Identity hardening ✅ done 2026-09-13
 
 **Goal:** close the identity holes without changing any flow. The app works exactly as before for real users.
 
