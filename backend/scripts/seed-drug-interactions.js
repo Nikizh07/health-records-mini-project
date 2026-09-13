@@ -4,7 +4,7 @@
 //
 // This is the deterministic half of the medication conflict detector:
 // it needs no network and no AI provider, so it keeps working when the
-// AI leg is disabled or unreachable. See AI_DRUG_INTERACTION_PLAN.md.
+// AI leg is disabled or unreachable. See thinking-archive/AI_DRUG_INTERACTION_PLAN.md.
 //
 // Conventions for every row:
 //   - drug_a / drug_b are NORMALISED: lowercase generic name only,

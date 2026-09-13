@@ -8,18 +8,20 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AI_DRUG_INTERACTION_PLAN.md    # cross-clinic medication conflict detector — Phases 1-4 built
-├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — not implemented yet
+├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, not implemented yet
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
-├── .claude/launch.json            # local preview servers: web (:5000 debug), web-doctor (:5001 profile build)
-├── DEVLOG.md                      # temporary log of the 2026-09-11 clinic-side/PC work
 ├── README.md                      # project overview, status, setup, testing (rewritten 2026-09-13)
-├── START_HERE.md, QUICK_START.md, SUMMARY.txt
-├── FIREBASE_CREDENTIALS_SETUP.md, REPLACE_FIREBASE_CREDENTIALS.md, QUICK_FIREBASE_SETUP.txt
-├── ENABLE_ANONYMOUS_AUTH.md, GUEST_LOGIN_SETUP.md
-├── check-firebase-config.sh
+├── .claude/launch.json            # local preview servers: web (:5000 debug), web-doctor (:5001 profile build)
+├── thinking-archive/              # no longer needed day to day; kept for history (moved 2026-09-13)
+│   ├── AI_DRUG_INTERACTION_PLAN.md    # drug conflict detector plan — Phases 1-4 built
+│   ├── DEVLOG.md                  # temporary log of the 2026-09-11 clinic-side/PC work (folded into MEMORY.md)
+│   ├── START_HERE.md, QUICK_START.md, SUMMARY.txt   # stale 2026-09-10 Firebase/guest setup notes
+│   ├── FIREBASE_CREDENTIALS_SETUP.md, REPLACE_FIREBASE_CREDENTIALS.md, QUICK_FIREBASE_SETUP.txt
+│   ├── ENABLE_ANONYMOUS_AUTH.md, GUEST_LOGIN_SETUP.md
+│   ├── check-firebase-config.sh   # uses root-relative paths; run from the repo root if ever needed
+│   └── doctor-creds.txt           # Firebase test phone + OTP (also in README/MEMORY)
 ├── .github/workflows/
 │   ├── build-apk.yml              # CI: builds an installable Android APK on every push to main
 │   └── deploy-container           # CI: backend image → GHCR. NOTE: no .yml extension, so GitHub never runs it

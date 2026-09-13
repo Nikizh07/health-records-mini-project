@@ -22,7 +22,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - **Status: plan only. No code changes made yet.**
 
 ## In progress: AI cross-clinic medication conflict detector
-- **Decision (2026-09-12):** warn a doctor at save time when a new prescription conflicts with a drug another clinic already started. Full plan: `AI_DRUG_INTERACTION_PLAN.md`.
+- **Decision (2026-09-12):** warn a doctor at save time when a new prescription conflicts with a drug another clinic already started. Full plan: `thinking-archive/AI_DRUG_INTERACTION_PLAN.md`.
 - Two knowledge sources: a seeded `drug_interactions` reference table (deterministic, always runs) **plus** an LLM leg.
 - **The AI provider is pluggable, configured by env vars only** (2026-09-12). One adapter contract (`isConfigured()` + `complete({system,user})`) with three implementations: `openai-compatible` (plain `fetch`, no deps — covers OpenAI, Gemini's compat endpoint, Groq, OpenRouter, Ollama, vLLM, any custom URL), `bedrock`, and `sagemaker`. Adding a provider = one file + one registry line. AWS SDKs are `optionalDependencies`, lazily required.
 - **The prompt lives in `backend/prompts/drug-interaction.md`, not in code** — `{{placeholders}}`, split into system/user by a `---USER---` line, cached only in production so prompt edits need no restart.
@@ -69,6 +69,10 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-13: Root docs tidied into `thinking-archive/`.**
+  - Moved there: the stale Firebase/guest setup notes (`START_HERE`, `QUICK_START`, `SUMMARY`, `*FIREBASE*`, `ENABLE_ANONYMOUS_AUTH`, `GUEST_LOGIN_SETUP`, `check-firebase-config.sh`), `DEVLOG.md`, `doctor-creds.txt` and the built `AI_DRUG_INTERACTION_PLAN.md`.
+  - The root keeps `README`, `CLAUDE`, `MEMORY`, `SNAPSHOT` and the two open plans (AWS, auth/RBAC).
+  - References in code comments, `README`, `AWS_MIGRATION_PLAN.md` and this file point at the new path.
 - **2026-09-13: Drug interaction Phase 4 — the AI leg is built.** `backend/services/ai/` (registry + three adapters), `backend/prompts/drug-interaction.md`, `scripts/test-ai-provider.js`. The AI leg runs only when `AI_*` is set in `backend/.env`. The local `.env` has none, so the running app still behaves table-only.
   - **The model names only the pair.** Clinic, date, scope and confidence come from the patient's records. A pair naming a drug that isn't in either list is dropped, and table severity beats the model's.
   - **Any AI failure is a fail-open** (`ai_available: false`, table results stand): timeouts, HTTP errors, unparseable output, an unknown `AI_PROVIDER` or a missing key.

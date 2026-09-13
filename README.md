@@ -127,7 +127,8 @@ The full schema is in [`backend/prisma/schema.prisma`](backend/prisma/schema.pri
 │   └── scripts/                # seeders, role tools, test suite
 ├── .github/workflows/          # CI (APK build)
 ├── AWS_MIGRATION_PLAN.md
-└── AI_DRUG_INTERACTION_PLAN.md
+├── AUTH_RBAC_CONSENT_PLAN.md
+└── thinking-archive/           # finished plans and old setup notes
 ```
 
 ---

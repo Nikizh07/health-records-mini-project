@@ -5,7 +5,7 @@
 // Checks the drugs a doctor is about to prescribe against everything the
 // patient is still taking, from EVERY clinic in the network.
 //
-// Two knowledge sources (see AI_DRUG_INTERACTION_PLAN.md):
+// Two knowledge sources (see thinking-archive/AI_DRUG_INTERACTION_PLAN.md):
 //   1. the curated `drug_interactions` table — deterministic, no network,
 //      always runs. This is the load-bearing safety component.
 //   2. an optional AI leg (services/ai) that catches brand names,
