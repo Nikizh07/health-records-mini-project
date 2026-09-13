@@ -14,6 +14,7 @@
 - Firebase (Auth + Admin) stays as is. The AWS migration covers only the DB, storage and backend hosting (see `AWS_MIGRATION_PLAN.md`).
 
 ## Commands
+- Local DB (start before the backend): `cd backend && docker compose up -d`
 - Backend dev: `cd backend && npm run dev`
 - Backend start: `cd backend && npm start`
 - Prisma migrations: `cd backend && npx prisma migrate deploy`

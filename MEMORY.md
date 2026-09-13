@@ -55,7 +55,9 @@ Cloud-based digital health record and appointment system for migrant worker clin
   - `flutter analyze` clean; `flutter test` 12 passed, 2 skipped.
   - **Gotcha:** the visit form scrolls, so `tester.tap()` on the save button misses on the 800px test view — call `tester.ensureVisible(button)` first. The old Ctrl+Enter test never hit this because a key event needs no hit test.
   - New `test/interaction_contract_test.dart` — the only test that proves the Dart client and the Node API agree on field names (everything else uses a fake). Needs `HttpOverrides.global = null`, and skips unless `TEST_ID_TOKEN` / `TEST_PATIENT_ID` are passed, so CI stays green. Verified for real against the backend.
-  - Still yours to do: the browser walkthrough. Widget tests cover the logic and wording, not the look.
+  - Browser walkthrough done by the user (2026-09-13): the banner shows in the `web-doctor` build, and the check row was stored (warfarin vs ibuprofen, CRITICAL, `EXISTING`).
+  - **Gotcha:** a tab loaded before `flutter build web --profile` keeps running the old JS, so it saves with no check call and no error. Hard-reload after every rebuild. The tell is a `POST /api/records` in the backend log with no `POST /api/records/interaction-check` before it.
+  - Test data left behind: patient `nihha` has an unchecked warfarin + ibuprofen record from 2026-09-13, saved by a stale tab.
 - **2026-09-12: Same-visit drug conflicts now fire.** `findTableConflicts` (`backend/services/interactionChecker.js`) checks pairs *within* the new prescription list as well as new-vs-active.
   - The gap: the function returned early when the patient had no active medications — exactly the case where a same-visit pair is the only thing that can fire. Warfarin + ibuprofen written together in one visit produced a clean result on a CRITICAL interaction.
   - Fixed **before** Phase 3 on purpose: a same-visit conflict has no source clinic or date, so the conflict object the banner renders changes shape. Building the banner first would have meant rebuilding it.
@@ -100,6 +102,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 
 ## Local dev setup (as of 2026-09-11)
 - DB: Docker container `migrant-clinic-db` (postgres:16, port 5432, volume `migrant_clinic_pgdata`), matching `backend/.env`. Migrations applied; seeded with `scripts/seed-nearby-clinics.js`. The older `postgres-dev` container belongs to another project — don't use it.
+  - (2026-09-13) `backend/docker-compose.yml` now defines it: same container name, port and volume, `restart: unless-stopped`. Run `cd backend && docker compose up -d`. It reads `POSTGRES_PASSWORD` from `backend/.env`, which must match `DATABASE_URL`. The original container was a `docker run` one with no restart policy, and it conflicts by name, so `docker rm` it once; the data lives in the volume. `/api/health` never touches the DB, so a stopped DB shows up only at login, as an `Invalid prisma.user.findUnique()` error with a blank message (ECONNREFUSED).
 - Phone testing over wireless adb: run `adb reverse tcp:3000 tcp:3000` so the app's default `http://localhost:3000/api` reaches the backend. No LAN IP or cleartext config change needed. Re-run after each adb reconnect.
 - Prisma 7: the datasource URL lives in `backend/prisma.config.ts`, not in `schema.prisma`.
 - Test accounts (2026-09-11):

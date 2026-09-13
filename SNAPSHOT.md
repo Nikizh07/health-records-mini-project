@@ -30,6 +30,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   ├── package.json               # express, prisma 7, @prisma/adapter-pg, firebase-admin, multer
 │   ├── prisma.config.ts           # Prisma 7 config (DATABASE_URL lives here, not in schema)
 │   ├── Dockerfile, .dockerignore  # node:22-slim image; secrets/uploads excluded
+│   ├── docker-compose.yml         # local Postgres 16 (migrant-clinic-db, :5432, volume migrant_clinic_pgdata)
 │   ├── .env (local secrets — never commit/print), .env.example, .gitignore
 │   ├── config/
 │   │   ├── prisma.js              # PrismaClient singleton (pg Pool adapter) — the real DB client
