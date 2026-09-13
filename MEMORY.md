@@ -45,6 +45,17 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-13: Drug interaction Phase 3 — the doctor can finally see it.** The visit form runs the pre-flight check and sends `check_id`, so Phases 1-2 stop being dead code.
+  - `record_service.dart`: new `checkDrugInteractions()`; `createMedicalRecord` takes `checkId` / `overrideReason`.
+  - `doctor_screens.dart`: `_InteractionBanner` + `_ConflictTile` above the save button, a reason field, and the button turning red and relabelling to **Save Anyway**. The banner branches on `scope` — a `SAME_VISIT` conflict reads "Both drugs are in this prescription" instead of naming a clinic.
+  - **A clean check saves in one press** (the plan said always stop after the check). Conflicts stop the save; nothing found falls straight through, still sending `check_id` so the audit row is linked.
+  - **The "AI check unavailable" note only appears alongside the banner.** `ai_available` is false on every response until Phase 4, so a standalone note would be permanent noise. With nothing found the screen makes no claim at all rather than a green all-clear it cannot back.
+  - **An unreachable check warns once, then lets the next press save without it** — a clinic on a flaky connection must still be able to record the visit.
+  - Editing any prescription field clears the stored verdict (`onChanged` on all three inputs plus add/remove), so an edited drug list is re-checked rather than saved against a stale warning.
+  - `flutter analyze` clean; `flutter test` 12 passed, 2 skipped.
+  - **Gotcha:** the visit form scrolls, so `tester.tap()` on the save button misses on the 800px test view — call `tester.ensureVisible(button)` first. The old Ctrl+Enter test never hit this because a key event needs no hit test.
+  - New `test/interaction_contract_test.dart` — the only test that proves the Dart client and the Node API agree on field names (everything else uses a fake). Needs `HttpOverrides.global = null`, and skips unless `TEST_ID_TOKEN` / `TEST_PATIENT_ID` are passed, so CI stays green. Verified for real against the backend.
+  - Still yours to do: the browser walkthrough. Widget tests cover the logic and wording, not the look.
 - **2026-09-12: Same-visit drug conflicts now fire.** `findTableConflicts` (`backend/services/interactionChecker.js`) checks pairs *within* the new prescription list as well as new-vs-active.
   - The gap: the function returned early when the patient had no active medications — exactly the case where a same-visit pair is the only thing that can fire. Warfarin + ibuprofen written together in one visit produced a clean result on a CRITICAL interaction.
   - Fixed **before** Phase 3 on purpose: a same-visit conflict has no source clinic or date, so the conflict object the banner renders changes shape. Building the banner first would have meant rebuilding it.

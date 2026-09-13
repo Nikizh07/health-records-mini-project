@@ -1,6 +1,6 @@
 # Plan: AI Cross-Clinic Medication Conflict Detector
 
-**Status: Phases 1-2 complete, plus the same-visit gap closed (2026-09-12). Phases 3-4 pending.**
+**Status: Phases 1-3 complete, plus the same-visit gap closed (2026-09-13). Phase 4 pending.**
 Approved 2026-09-12; Phase 4 revised the same day to be provider-agnostic.
 
 ## Context
@@ -73,7 +73,7 @@ feature, and Phase 4 can slip without stranding half-built work.
 |---|---|---|---|
 | 1 | ✅ **Done** — schema + deterministic checker + check endpoint | — | none |
 | 2 | ✅ **Done** — audit wiring into record creation | 1 | none |
-| 3 | Flutter banner + override UI + tests | 2 | none |
+| 3 | ✅ **Done** — Flutter banner + override UI + tests | 2 | none |
 | 4 | Pluggable AI layer + prompt file | 1 | one AI endpoint (any) |
 
 ---
@@ -359,7 +359,7 @@ tested.
 
 ---
 
-## Phase 3 — Doctor UI (Flutter)
+## Phase 3 — Doctor UI (Flutter) ✅ DONE
 
 Goal: the feature is visible and usable end to end, still with no AI dependency.
 
@@ -425,6 +425,49 @@ button spinner keeps animating behind the success dialog, and the new check spin
 > **Done when:** `cd mobile_app && flutter analyze && flutter test` is green, and in the browser (you drive
 > it) a doctor adding ibuprofen to a warfarin patient sees the red banner with Clinic A's name and date,
 > is refused a save until a reason is entered, and then saves successfully.
+
+### Phase 3 outcome (2026-09-13)
+
+`flutter analyze` clean, `flutter test` 12 passed / 2 skipped. The feature is now reachable by a doctor:
+the app finally sends a `check_id`, so Phases 1-2 stop being dead code.
+
+| File | Change |
+|---|---|
+| `lib/data/services/record_service.dart` | `checkDrugInteractions()`; `createMedicalRecord` gained `checkId` / `overrideReason` |
+| `lib/presentation/screens/doctor/doctor_screens.dart` | pre-flight state, the reworked save flow, `_InteractionBanner` + `_ConflictTile`, `onChanged` on every prescription field |
+| `test/clinic_flow_test.dart` | fake gained the check; six new cases |
+| `test/interaction_contract_test.dart` | **new** — client/server contract, skips without a live backend |
+
+Three decisions that depart from the plan as written:
+
+- **A clean check saves in the same press.** The plan said the first press always runs the check and
+  returns without saving. Taken literally that makes every clean prescription — the common case — a
+  two-click save for no benefit. Now: conflicts found → banner and stop; nothing found → fall straight
+  through to the save, still sending the `check_id` so the audit row is written and linked.
+- **The "AI check unavailable" note rides with the banner instead of standing alone.** `ai_available` is
+  `false` on every response until Phase 4 exists, so a standalone note would be permanent furniture that
+  doctors learn to ignore. Its real job is qualifying a list that is being shown — "this may be
+  incomplete". With nothing found the screen makes **no claim at all**, which still honours the rule
+  against a green all-clear that cannot be backed up.
+- **A check that cannot be reached warns once, then lets the save through.** Not in the plan. If the
+  endpoint is unreachable the doctor is told, and a second press records the visit with no `check_id`.
+  A walk-in clinic on a flaky connection must still be able to write the record; the alternative traps
+  the doctor in a failing call with no way to save.
+
+Testing notes for whoever comes next:
+
+- The visit form scrolls, so `tester.tap()` on the save button **misses** on an 800px-tall test view.
+  Call `tester.ensureVisible(button)` first — the original Ctrl+Enter test never hit this because a key
+  event needs no hit test.
+- The Ctrl+Enter test's expected payload changed: a clean save now carries `'check_id': 'chk-1'` and a
+  null `override_reason`.
+- `test/interaction_contract_test.dart` is the only thing that proves the Dart client and the Node API
+  agree on field names — everything else uses a fake. It needs `HttpOverrides.global = null` (flutter_test
+  fails real requests by default) and skips itself unless `TEST_ID_TOKEN` / `TEST_PATIENT_ID` are defined,
+  so CI stays green. It has been run for real against the backend and passes.
+
+**Not done:** the browser walkthrough in the "Done when" above is still yours to drive — the widget tests
+cover the logic and the wording, not how it actually looks on screen.
 
 ---
 

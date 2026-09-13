@@ -1078,6 +1078,20 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
   final List<_PrescriptionEntry> _prescriptions = [];
   bool _isSubmitting = false;
 
+  // ── Drug interaction pre-flight ──────────────────────────
+  // The first save of a given drug list runs the check. A clean result saves
+  // straight through; conflicts render the banner and hold the save until the
+  // doctor gives a reason. Editing any drug clears the verdict below.
+  final _overrideReasonController = TextEditingController();
+  bool _isCheckingInteractions = false;
+  List<Map<String, dynamic>> _conflicts = [];
+  String? _checkId;
+  bool _aiUnavailable = false;
+  // Set when the check endpoint itself could not be reached. A clinic must
+  // still be able to record a visit on a flaky connection, so the next press
+  // saves without a check rather than trapping the doctor in a failing call.
+  bool _checkUnreachable = false;
+
   @override
   void initState() {
     super.initState();
@@ -1089,6 +1103,7 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
   void dispose() {
     _diagnosisController.dispose();
     _notesController.dispose();
+    _overrideReasonController.dispose();
     for (final p in _prescriptions) {
       p.dispose();
     }
@@ -1099,6 +1114,7 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
     setState(() {
       _prescriptions.add(_PrescriptionEntry());
     });
+    _invalidateInteractionCheck();
   }
 
   void _removePrescription(int index) {
@@ -1107,7 +1123,22 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
         _prescriptions[index].dispose();
         _prescriptions.removeAt(index);
       });
+      _invalidateInteractionCheck();
     }
+  }
+
+  /// Any edit to the drug list makes a stored verdict stale, so the next save
+  /// re-checks instead of saving against conflicts that were computed for a
+  /// different set of drugs.
+  void _invalidateInteractionCheck() {
+    if (_checkId == null && _conflicts.isEmpty && !_checkUnreachable) return;
+    setState(() {
+      _checkId = null;
+      _conflicts = [];
+      _aiUnavailable = false;
+      _checkUnreachable = false;
+      _overrideReasonController.clear();
+    });
   }
 
   Future<void> _submitRecord() async {
@@ -1184,6 +1215,65 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
       }
     }
 
+    // ── Drug interaction pre-flight ──────────────────────────
+    // Runs once per drug list. No conflicts → fall through and save in the
+    // same press, so a clean prescription still takes one click. Conflicts →
+    // render the banner and return; the doctor reads it and decides.
+    if (_checkId == null && !_checkUnreachable && formattedPrescriptions.isNotEmpty) {
+      setState(() => _isCheckingInteractions = true);
+      try {
+        final result =
+            await ref.read(recordServiceProvider).checkDrugInteractions(
+                  idToken: token,
+                  patientId: patientId,
+                  prescriptions: formattedPrescriptions,
+                );
+        final found = (result['conflicts'] as List? ?? const [])
+            .map((c) => Map<String, dynamic>.from(c as Map))
+            .toList();
+        if (!mounted) return;
+        setState(() {
+          _isCheckingInteractions = false;
+          _checkId = result['check_id']?.toString();
+          _conflicts = found;
+          _aiUnavailable = result['ai_available'] != true;
+        });
+        if (found.isNotEmpty) return; // banner is now on screen
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _isCheckingInteractions = false;
+          _checkUnreachable = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Interaction check unavailable (${e.toString().replaceAll('Exception: ', '')}). '
+              'Press save again to record the visit without it.',
+            ),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+        return;
+      }
+    }
+
+    // The server refuses a conflicted save without a reason; catch it here so
+    // the doctor gets an inline message instead of a round trip and a 400.
+    final overrideReason = _overrideReasonController.text.trim();
+    if (_conflicts.isNotEmpty && overrideReason.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Enter why this prescription should go ahead despite the interaction warning.',
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     final appointmentId =
         widget.initialAppointmentData?['appointment_id']?.toString();
     final authState = ref.read(authNotifierProvider);
@@ -1206,6 +1296,8 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
         diagnosis: _diagnosisController.text.trim(),
         notes: _notesController.text.trim().isNotEmpty ? _notesController.text.trim() : null,
         prescriptions: formattedPrescriptions.isNotEmpty ? formattedPrescriptions : null,
+        checkId: _checkId,
+        overrideReason: _conflicts.isNotEmpty ? overrideReason : null,
       );
 
       // Invalidate appointment queue so the status updates to 'completed'
@@ -1328,7 +1420,7 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
       body: CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.enter, control: true): () {
-            if (!_isSubmitting) _submitRecord();
+            if (!_isSubmitting && !_isCheckingInteractions) _submitRecord();
           },
         },
         child: SingleChildScrollView(
@@ -1585,6 +1677,7 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
                       index: index,
                       entry: item,
                       onDelete: () => _removePrescription(index),
+                      onChanged: _invalidateInteractionCheck,
                     );
                   },
                 ),
@@ -1611,13 +1704,25 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
 
               const SizedBox(height: 32),
 
+              // ── 3b. Drug Interaction Warning ─────────────────────
+              if (_conflicts.isNotEmpty) ...[
+                _InteractionBanner(
+                  conflicts: _conflicts,
+                  aiUnavailable: _aiUnavailable,
+                  reasonController: _overrideReasonController,
+                ),
+                const SizedBox(height: 20),
+              ],
+
               // ── 4. Submit Button ─────────────────────────────────
               SizedBox(
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton.icon(
-                  onPressed: _isSubmitting ? null : _submitRecord,
-                  icon: _isSubmitting
+                  onPressed: (_isSubmitting || _isCheckingInteractions)
+                      ? null
+                      : _submitRecord,
+                  icon: (_isSubmitting || _isCheckingInteractions)
                       ? const SizedBox(
                           width: 20,
                           height: 20,
@@ -1626,13 +1731,23 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
                             color: Colors.white,
                           ),
                         )
-                      : const Icon(Icons.save_outlined),
+                      : Icon(_conflicts.isNotEmpty
+                          ? Icons.warning_amber_rounded
+                          : Icons.save_outlined),
                   label: Text(
-                    _isSubmitting ? 'Saving Visit Record...' : 'Complete & Save Visit Record',
+                    _isCheckingInteractions
+                        ? 'Checking Interactions...'
+                        : _isSubmitting
+                            ? 'Saving Visit Record...'
+                            : _conflicts.isNotEmpty
+                                ? 'Save Anyway'
+                                : 'Complete & Save Visit Record',
                     style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF006D77),
+                    backgroundColor: _conflicts.isNotEmpty
+                        ? const Color(0xFFC62828)
+                        : const Color(0xFF006D77),
                     foregroundColor: Colors.white,
                     elevation: 2,
                     shape: RoundedRectangleBorder(
@@ -1661,6 +1776,256 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Drug Interaction Warning Banner
+// ────────────────────────────────────────────────────────────────────────────
+// Shown once the pre-flight check comes back with something. The server has
+// already stored these conflicts against a check_id, so the reason typed here
+// is what unlocks the save — an empty one is refused by the API too.
+
+class _InteractionBanner extends StatelessWidget {
+  const _InteractionBanner({
+    required this.conflicts,
+    required this.aiUnavailable,
+    required this.reasonController,
+  });
+
+  final List<Map<String, dynamic>> conflicts;
+  final bool aiUnavailable;
+  final TextEditingController reasonController;
+
+  /// Matches the status-chip palette used by _DoctorAppointmentCard.
+  static (Color, Color) _severityColors(String severity) {
+    switch (severity.toUpperCase()) {
+      case 'CRITICAL':
+        return (const Color(0xFFC62828), const Color(0xFFFFEBEE));
+      case 'MAJOR':
+        return (const Color(0xFFE65100), const Color(0xFFFFF3E0));
+      case 'MODERATE':
+        return (const Color(0xFFF57F17), const Color(0xFFFFFDE7));
+      default:
+        return (const Color(0xFF546E7A), const Color(0xFFECEFF1));
+    }
+  }
+
+  /// A SAME_VISIT conflict has no prescribing clinic or date — both drugs are
+  /// being written right now — so it must not be rendered with the "already
+  /// taking" wording, which would print an empty clinic.
+  static String _provenance(Map<String, dynamic> conflict) {
+    if (conflict['scope']?.toString() == 'SAME_VISIT') {
+      return 'Both drugs are in this prescription';
+    }
+    final clinic = conflict['clinic_name']?.toString();
+    final rawDate = conflict['prescribed_on']?.toString();
+    final date = rawDate == null ? null : DateTime.tryParse(rawDate);
+    final parts = <String>[
+      if (clinic != null && clinic.isNotEmpty) clinic,
+      if (date != null) DateFormat('dd MMM yyyy').format(date.toLocal()),
+    ];
+    if (parts.isEmpty) return 'Already prescribed';
+    return 'Already taking — ${parts.join(' · ')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.red.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  conflicts.length == 1
+                      ? '1 drug interaction found'
+                      : '${conflicts.length} drug interactions found',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red.shade700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (final conflict in conflicts) ...[
+            _ConflictTile(
+              conflict: conflict,
+              colors: _severityColors(conflict['severity']?.toString() ?? ''),
+              provenance: _provenance(conflict),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (aiUnavailable) ...[
+            const SizedBox(height: 2),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline, size: 15, color: Colors.orange.shade800),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'AI check unavailable — showing known interactions only. '
+                    'Brand names and rarer combinations may be missed.',
+                    style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 12),
+          TextField(
+            controller: reasonController,
+            minLines: 2,
+            maxLines: 3,
+            decoration: InputDecoration(
+              labelText: 'Reason for prescribing anyway *',
+              hintText: 'e.g. INR monitored weekly; patient counselled on bleeding risk',
+              isDense: true,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'This reason is stored with the record.',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConflictTile extends StatelessWidget {
+  const _ConflictTile({
+    required this.conflict,
+    required this.colors,
+    required this.provenance,
+  });
+
+  final Map<String, dynamic> conflict;
+  final (Color, Color) colors;
+  final String provenance;
+
+  @override
+  Widget build(BuildContext context) {
+    final (severityColor, severityBg) = colors;
+    final severity = conflict['severity']?.toString().toUpperCase() ?? 'UNKNOWN';
+    final newDrug = conflict['new_drug']?.toString() ?? 'This drug';
+    final otherDrug = conflict['existing_drug']?.toString() ?? 'another drug';
+    final explanation = conflict['explanation']?.toString();
+    final alternative = conflict['suggested_alternative']?.toString();
+    final assumed = conflict['confidence']?.toString() == 'ASSUMED';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: severityBg,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  severity,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: severityColor,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '$newDrug + $otherDrug',
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.history, size: 13, color: Colors.grey.shade600),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  provenance,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (assumed) ...[
+            const SizedBox(height: 3),
+            Padding(
+              padding: const EdgeInsets.only(left: 19),
+              child: Text(
+                'Duration unclear — assumed still active',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              ),
+            ),
+          ],
+          if (explanation != null && explanation.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              explanation,
+              style: TextStyle(fontSize: 12.5, color: Colors.grey.shade800, height: 1.3),
+            ),
+          ],
+          if (alternative != null && alternative.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.swap_horiz, size: 14, color: Color(0xFF2E7D32)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Consider instead: $alternative',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF2E7D32),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Prescription Row Card Widget
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -1669,16 +2034,23 @@ class _PrescriptionCard extends StatelessWidget {
   final _PrescriptionEntry entry;
   final VoidCallback onDelete;
 
+  /// Fired on every keystroke so the screen can drop a stale interaction
+  /// verdict — a warning computed for "Ibuprofen" must not survive an edit
+  /// to "Ibuprofen 400mg with food", let alone to a different drug.
+  final VoidCallback onChanged;
+
   const _PrescriptionCard({
     required this.index,
     required this.entry,
     required this.onDelete,
+    required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     final medicine = TextFormField(
       controller: entry.medicineController,
+      onChanged: (_) => onChanged(),
       decoration: InputDecoration(
         labelText: 'Medicine Name *',
         hintText: 'e.g. Amoxicillin / Paracetamol',
@@ -1698,6 +2070,7 @@ class _PrescriptionCard extends StatelessWidget {
     );
     final dosage = TextFormField(
       controller: entry.dosageController,
+      onChanged: (_) => onChanged(),
       decoration: InputDecoration(
         labelText: 'Dosage *',
         hintText: 'e.g. 500mg TDS',
@@ -1715,6 +2088,7 @@ class _PrescriptionCard extends StatelessWidget {
     );
     final duration = TextFormField(
       controller: entry.durationController,
+      onChanged: (_) => onChanged(),
       decoration: InputDecoration(
         labelText: 'Duration *',
         hintText: 'e.g. 5 days',

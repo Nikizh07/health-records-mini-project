@@ -1,6 +1,6 @@
 # Folder Snapshot
 
-Snapshot of the project layout as of 2026-09-12. It leaves out generated/build output (`node_modules/`, `.dart_tool/`, `build/`, `.gradle/`, lockfiles, `ephemeral/`).
+Snapshot of the project layout as of 2026-09-13. It leaves out generated/build output (`node_modules/`, `.dart_tool/`, `build/`, `.gradle/`, lockfiles, `ephemeral/`).
 Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed to one line each.
 
 **Keep this file current:** when files or folders are added, moved or deleted, update the tree below.
@@ -79,7 +79,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     ├── flutter_launcher_icons.yaml, flutter_native_splash.yaml
     ├── assets/icons/              # app_icon.png, splash_logo.png
     ├── test/widget_test.dart, clinic_shell_test.dart (role gate),
-    │   clinic_flow_test.dart (doctor/admin screens via real router + fake services)
+    │   clinic_flow_test.dart (doctor/admin screens via real router + fake services),
+    │   interaction_contract_test.dart (client↔API field names; skips without a live backend)
     ├── lib/
     │   ├── main.dart
     │   ├── firebase_options.dart  # Firebase client config (unchanged by AWS move)
@@ -94,7 +95,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   ├── data/services/
     │   │   ├── auth_service.dart, secure_storage_service.dart, local_cache_service.dart
     │   │   ├── patient_service.dart, appointment_service.dart
-    │   │   ├── record_service.dart, admin_service.dart
+    │   │   ├── record_service.dart   # records + checkDrugInteractions (pre-flight)
+    │   │   ├── admin_service.dart
     │   ├── providers/
     │   │   ├── app_providers.dart, auth_provider.dart, locale_provider.dart
     │   │   ├── appointment_provider.dart, records_provider.dart
@@ -106,7 +108,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   │   │   ├── appointments/  # appointments_screen, book_appointment_screen
     │   │   │   ├── records/       # records_screen, record_detail_screen (opens report URL)
     │   │   │   ├── clinic/clinic_shell.dart   # wraps signed-in routes: auth wait, role gate, staff side nav on wide screens
-    │   │   │   ├── doctor/doctor_screens.dart # queue, add visit record, patient lookup
+    │   │   │   ├── doctor/doctor_screens.dart # queue, add visit record, patient lookup;
+    │   │   │   │                              # _InteractionBanner = drug conflict warning + override reason
     │   │   │   ├── admin/admin_screens.dart   # manage doctors, manage clinics
     │   │   │   └── profile/profile_screen.dart
     │   │   └── widgets/           # app_error_view, custom_card, offline_banner, responsive_card_list
