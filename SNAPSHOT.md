@@ -8,7 +8,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-5 built
+├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-6 built
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
@@ -51,7 +51,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   └── record.routes.js       # records, POST /interaction-check, POST /:id/upload (multer)
 │   ├── controllers/
 │   │   ├── health.controller.js, patient.controller.js (+ desk registration, claim by DOB), doctor.controller.js
-│   │   ├── clinic.controller.js, appointment.controller.js
+│   │   ├── clinic.controller.js, appointment.controller.js (+ confirm)
 │   │   ├── staff.controller.js    # buildInvite (shared with POST /doctors), acceptInvite (used by /patients/me),
 │   │   │                          # applications, staff list, approve/reject/disable
 │   │   └── record.controller.js   # medical records, prescriptions, report upload,
@@ -134,6 +134,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   │   │   ├── clinic/clinic_shell.dart   # wraps signed-in routes: auth wait, permission gate, permission-filtered staff side nav on wide screens
     │   │   │   ├── doctor/doctor_screens.dart # queue, add visit record, patient lookup;
     │   │   │   │                              # _InteractionBanner = drug conflict warning + override reason
+    │   │   │   ├── reception/reception_screens.dart # front desk pieces used by the queue + lookup screens:
+    │   │   │   │                              # register-patient dialog, demographics + walk-in doctor picker, confirm/cancel
     │   │   │   ├── admin/admin_screens.dart   # Staff (applications / staff / invites tabs + invite dialog), manage clinics
     │   │   │   └── profile/profile_screen.dart
     │   │   └── widgets/           # app_error_view, custom_card, offline_banner, responsive_card_list

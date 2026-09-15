@@ -10,6 +10,7 @@
 // config/permissions.js, account status, clinic scope.
 // Phase 3: staff onboarding — invites, doctor applications, approve/reject/disable.
 // Phase 5: desk registration (no account) and the patient's claim by date of birth.
+// Phase 6: front desk — clinic queue, walk-ins with a named doctor, confirm, no records.
 //
 // Same harness as scripts/test-interactions.js: Firebase is stubbed in
 // require.cache before the app loads and the real Express app is driven over
@@ -600,6 +601,59 @@ async function main() {
   const parallel = await Promise.all(Array.from({ length: 8 }, (_, i) =>
     api('POST', '/patients/claim', { token: GUESSER, body: { dob: `1975-02-0${i + 1}` } })));
   ok('…parallel guesses do not get past the lock', parallel.every((g) => g.status === 423), parallel.map((g) => g.status).join());
+
+  // ═══════════════════════════════════════════════════════════
+  // Phase 6: receptionist front desk
+  // ═══════════════════════════════════════════════════════════
+  section('Phase 6 · clinic queue and walk-ins');
+  const inDays = (d) => new Date(Date.now() + d * 864e5);
+  const pendingA = await prisma.appointment.create({ data: { patient_id: patient2.id, doctor_id: doctorA.id, clinic_id: clinic.id, slot_time: inDays(2) } });
+  const pendingB = await prisma.appointment.create({ data: { patient_id: patient2.id, doctor_id: doctorB.id, clinic_id: clinic.id, slot_time: inDays(3) } });
+  const pendingOther = await prisma.appointment.create({ data: { patient_id: patient2.id, doctor_id: doctorOther.id, clinic_id: clinic2.id, slot_time: inDays(2) } });
+
+  r = await api('GET', '/appointments', { token: AS.RECEPTIONIST });
+  const queueDoctors = new Set((r.body?.data || []).map((a) => a.doctor_id));
+  ok('the receptionist queue lists every doctor at the clinic, each named',
+    r.status === 200 && queueDoctors.has(doctorA.id) && queueDoctors.has(doctorB.id) &&
+      r.body.data.every((a) => a.clinic_id === clinic.id && a.doctor?.name), detail(r));
+  r = await api('POST', '/appointments', { token: AS.RECEPTIONIST, body: { patient_id: deskPatient.id } });
+  ok('a receptionist walk-in must name the doctor', r.status === 400, detail(r));
+  r = await api('POST', '/appointments', { token: AS.RECEPTIONIST, body: { patient_id: deskPatient.id, doctor_id: doctorOther.id, clinic_id: clinic.id } });
+  ok("…and can't pass another clinic's doctor off as their own", r.status === 400, detail(r));
+  r = await api('POST', '/appointments', { token: AS.RECEPTIONIST, body: { patient_id: deskPatient.id, doctor_id: doctorA.id } });
+  const walkIn = r.body?.data;
+  ok('a desk-registered patient is booked with a doctor, confirmed', r.status === 201 && walkIn?.status === 'confirmed' && walkIn?.clinic_id === clinic.id, detail(r));
+  r = await api('GET', '/appointments', { token: DOC_A });
+  ok('…and the doctor sees them in their queue', r.status === 200 && r.body.data.some((a) => a.id === walkIn?.id), detail(r));
+
+  section('Phase 6 · confirm / reschedule / cancel at the clinic');
+  r = await api('PATCH', `/appointments/${pendingA.id}/confirm`, { token: AS.PATIENT });
+  ok('a patient cannot confirm', gateDenied(r), detail(r));
+  r = await api('PATCH', `/appointments/${pendingA.id}/confirm`, { token: CADMIN2 });
+  ok("another clinic's admin cannot confirm", r.status === 403, detail(r));
+  r = await api('PATCH', `/appointments/${pendingB.id}/confirm`, { token: DOC_A });
+  ok("a doctor cannot confirm a colleague's appointment", r.status === 403, detail(r));
+  r = await api('PATCH', `/appointments/${pendingOther.id}/confirm`, { token: AS.RECEPTIONIST });
+  ok("a receptionist cannot confirm another clinic's appointment", r.status === 403, detail(r));
+  r = await api('PATCH', `/appointments/${pendingB.id}/confirm`, { token: AS.RECEPTIONIST });
+  ok("a receptionist confirms any doctor's appointment at their clinic", r.status === 200 && r.body?.data?.status === 'confirmed', detail(r));
+  r = await api('PATCH', `/appointments/${pendingB.id}/confirm`, { token: AS.RECEPTIONIST });
+  ok('…but only once (it is no longer pending)', r.status === 400, detail(r));
+  r = await api('PATCH', `/appointments/${pendingA.id}/confirm`, { token: DOC_A });
+  ok('a doctor confirms their own', r.status === 200, detail(r));
+  r = await api('PUT', `/appointments/${pendingA.id}`, { token: AS.RECEPTIONIST, body: { slot_time: inDays(4).toISOString() } });
+  ok('a receptionist reschedules at their clinic', r.status === 200, detail(r));
+  r = await api('PUT', `/appointments/${pendingOther.id}`, { token: AS.RECEPTIONIST, body: { slot_time: inDays(4).toISOString() } });
+  ok('…not at another clinic', r.status === 403, detail(r));
+  r = await api('PATCH', `/appointments/${pendingA.id}/cancel`, { token: AS.RECEPTIONIST });
+  ok('a receptionist cancels at their clinic', r.status === 200, detail(r));
+
+  section('Phase 6 · the front desk never sees records');
+  for (const [method, endpoint] of [['GET', `/records/patient/${deskPatient.id}`], ['GET', `/records/${rec.id}`],
+    ['POST', '/records'], ['POST', '/records/interaction-check'], ['POST', `/records/${rec.id}/upload`]]) {
+    r = await api(method, endpoint, { token: AS.RECEPTIONIST, body: method === 'POST' ? { patient_id: deskPatient.id } : undefined });
+    ok(`RECEPTIONIST ${method} ${endpoint.replace(/[0-9a-f-]{36}/g, ':id')} → 403`, r.status === 403, detail(r));
+  }
 
   // ───────────────────────────────────────────────────────────
   section('A database failure is a 500, not a logout');

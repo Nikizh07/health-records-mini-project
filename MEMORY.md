@@ -35,7 +35,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - ~~Known gap: same-visit pairs don't fire~~ — closed 2026-09-12.
 
 ## Planned: registration, RBAC and patient consent
-- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-3 done; Phases 4-5 built and tested (2026-09-15), user click-throughs pending; next is 6 or 7.**
+- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-3 done; Phases 4-6 built and tested (2026-09-15), user click-throughs pending; next is 7.**
 - Split into 8 phases, one migration per phase (2026-09-13):
   1. identity hardening
   2. roles + permission table
@@ -69,6 +69,17 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-15: Auth/RBAC Phase 6 — receptionist front desk.**
+  - **Backend was mostly done already**: Phase 2 had scoped `appointment:manage` (clinic-wide queue for RECEPTIONIST/CLINIC_ADMIN, walk-in doctor must be at the caller's clinic, reschedule/cancel scoped) and moved the routes to permissions. The only gap was that **no confirm action existed**, so new `PATCH /appointments/:id/confirm` (pending → confirmed, conditional `updateMany`, same `outsideStaffScope`). Postman `04. Appointment Module` request 6.
+  - **No new routes or nav entries, unlike the plan.** The existing `/doctor/today-appointments` and `/doctor/patients` screens adapt by permission, so the receptionist nav is Queue + Patients:
+    - Queue without `record:write` → "Clinic Queue": each card names the doctor and has Confirm (pending) / Cancel (with a confirm dialog) instead of Start consultation.
+    - `/doctor/patients` is now gated by `patient:lookup` (was `record:read`). Without `record:read` the right side is `FrontDeskPatientPanel` (demographics + Walk-in with a doctor picker) and **no records call is made**. "Register patient" in the app bar for anyone with `patient:register` (doctors too) selects the new patient.
+  - New `presentation/screens/reception/reception_screens.dart` holds those pieces (register dialog, patient panel, doctor picker, queue actions). `AppointmentService.createWalkIn` takes an optional `doctorId`; new `confirmAppointment`; new `PatientService.registerAtDesk`.
+  - Dashboard header for receptionist/clinic admin now shows the clinic name instead of "Health ID: MWH-PENDING".
+  - Tests: `test-auth-rbac.js` 221/221 (clinic queue across doctors, walk-in needs a doctor, doctor/clinic mismatch, doctor sees the walk-in, confirm scope for patient/other clinic/colleague, confirm twice → 400, reschedule/cancel, receptionist 403 on all five `/records` routes); `test-interactions.js` 112/112; `flutter test` 17 passed, 2 skipped (new receptionist flow); `flutter analyze` clean.
+  - **Gotcha:** don't run `dart format` on `doctor_screens.dart`: the file isn't formatted, so it rewrites ~1300 lines. Format only new files.
+  - **Gotcha:** the `migrant-clinic-db` container is still the old `docker run` one, so `docker compose up -d` fails on the name conflict; `docker start migrant-clinic-db` works.
+  - Known gaps: the queue has no doctor filter; `/patients/search` still searches every patient for the front desk until Phase 7; user click-through pending (receptionist registers a walk-in, books a doctor, the doctor sees it).
 - **2026-09-15: Auth/RBAC Phase 5 — patient sign-in and desk registration.**
   - Migration `20260915180000_add_patient_registered_by`: `patients` += `registered_by_user_id` (plain UUID, no FK, so removing a staff user never blocks), `claim_failures`, `claim_locked_until`.
   - **Desk registration is `POST /patients/register`, not `POST /patients` as the plan said**: the Phase 2 matrix test decides pass/fail from the permission gate's 403 message, so `patient:register` needs its own gated route. Body `{name, dob, gender, language_pref, phone}`; the phone goes through `toE164` (10 digits get +91). Duplicate phone → 409 with the existing patient in `data`.

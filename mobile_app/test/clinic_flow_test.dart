@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/data/services/admin_service.dart';
+import 'package:mobile_app/data/services/appointment_service.dart';
 import 'package:mobile_app/data/services/auth_service.dart';
 import 'package:mobile_app/data/services/local_cache_service.dart';
 import 'package:mobile_app/data/services/patient_service.dart';
@@ -15,6 +16,7 @@ import 'package:mobile_app/data/services/secure_storage_service.dart';
 import 'package:mobile_app/data/services/staff_service.dart';
 import 'package:mobile_app/l10n/generated/app_localizations.dart';
 import 'package:mobile_app/providers/admin_provider.dart';
+import 'package:mobile_app/providers/appointment_provider.dart';
 import 'package:mobile_app/providers/auth_provider.dart';
 import 'package:mobile_app/providers/records_provider.dart';
 import 'package:mobile_app/routes/app_router.dart';
@@ -67,6 +69,20 @@ class _Patients extends PatientService {
   final Map<String, dynamic> profile;
 
   String? claimedDob;
+  Map<String, String>? registered;
+
+  @override
+  Future<Map<String, dynamic>> registerAtDesk({
+    required String idToken,
+    required String name,
+    required String dob,
+    required String gender,
+    required String languagePref,
+    required String phone,
+  }) async {
+    registered = {'name': name, 'dob': dob, 'phone': phone};
+    return {'id': 'p-new', 'name': name, 'health_id': 'MWH-NEW001', 'phone': '+91$phone', 'gender': gender, 'dob': '${dob}T00:00:00.000Z'};
+  }
 
   @override
   Future<Map<String, dynamic>?> getMyProfile(String idToken) async => profile;
@@ -96,6 +112,7 @@ class _Records extends RecordService {
   bool aiAvailable = false;
   int checkCalls = 0;
   List<Map<String, String>>? checkedPrescriptions;
+  int historyCalls = 0;
 
   @override
   Future<Map<String, dynamic>> checkDrugInteractions({
@@ -116,8 +133,10 @@ class _Records extends RecordService {
   Future<List<Map<String, dynamic>>> getPatientRecords({
     required String idToken,
     required String patientId,
-  }) async =>
-      List.of(records);
+  }) async {
+    historyCalls++;
+    return List.of(records);
+  }
 
   @override
   Future<Map<String, dynamic>> createMedicalRecord({
@@ -161,6 +180,45 @@ class _Admin extends AdminService {
       ];
 }
 
+class _Appointments extends AppointmentService {
+  _Appointments() : super(dio: Dio());
+  Map<String, String?>? walkIn;
+  final confirmed = <String>[];
+
+  @override
+  Future<List<Map<String, dynamic>>> getDoctors({required String idToken, required String clinicId}) async => [
+        {'id': 'd1', 'name': 'Dr. Rao', 'specialization': 'GP'},
+        {'id': 'd2', 'name': 'Iyer', 'specialization': 'Dermatology'},
+      ];
+
+  @override
+  Future<List<Map<String, dynamic>>> getDoctorAppointments({
+    required String idToken,
+    String? doctorId,
+    String? clinicId,
+    String? date,
+    String? status,
+  }) async =>
+      [
+        {'id': 'a1', 'status': 'pending', 'slot_time': '2026-09-15T04:30:00Z', 'patient': _patient,
+            'doctor': {'name': 'Dr. Rao'}, 'clinic': {'name': 'Central Clinic'}},
+        {'id': 'a2', 'status': 'confirmed', 'slot_time': '2026-09-15T05:00:00Z', 'patient': _patient,
+            'doctor': {'name': 'Iyer'}, 'clinic': {'name': 'Central Clinic'}},
+      ];
+
+  @override
+  Future<Map<String, dynamic>> createWalkIn({required String idToken, required String patientId, String? doctorId}) async {
+    walkIn = {'patient_id': patientId, 'doctor_id': doctorId};
+    return {'id': 'a3'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> confirmAppointment({required String idToken, required String appointmentId}) async {
+    confirmed.add(appointmentId);
+    return {'id': appointmentId, 'status': 'confirmed'};
+  }
+}
+
 class _Staff extends StaffService {
   _Staff() : super(dio: Dio());
   final actions = <String>[];
@@ -192,6 +250,9 @@ Map<String, dynamic> _profile(String role) => switch (role) {
               'interaction:check', 'report:upload', 'consent:request', 'consent:emergency']},
       'PENDING_DOCTOR' => {'name': 'Iyer', 'status': 'PENDING', 'permissions': <String>[],
           'clinic': {'name': 'Central Clinic'}, 'user': {'role': 'DOCTOR'}},
+      'RECEPTIONIST' => {'name': 'Front Desk', 'role': 'RECEPTIONIST', 'status': 'ACTIVE', 'user': {'role': 'RECEPTIONIST'},
+          'clinic': {'id': 'c1', 'name': 'Central Clinic'},
+          'permissions': ['patient:register', 'patient:lookup', 'appointment:manage']},
       'UNVERIFIED' => {'next': 'VERIFY_EMAIL'},
       'STAFF_APPLY' => {'next': 'STAFF_APPLY'},
       'CLAIM' => {'next': 'CLAIM'},
@@ -209,6 +270,7 @@ Future<void> _pumpApp(
   _Staff? staff,
   _Auth? auth,
   _Patients? patients,
+  _Appointments? appointments,
   String? token = 'test-token',
   Size size = const Size(1280, 800),
 }) async {
@@ -224,6 +286,7 @@ Future<void> _pumpApp(
       recordServiceProvider.overrideWithValue(records ?? _Records()),
       adminServiceProvider.overrideWithValue(_Admin()),
       staffServiceProvider.overrideWithValue(staff ?? _Staff()),
+      appointmentServiceProvider.overrideWithValue(appointments ?? _Appointments()),
     ],
     child: MaterialApp.router(
       routerConfig: appRouter,
@@ -510,6 +573,52 @@ void main() {
     expect(find.byType(Dialog), findsOneWidget);
     expect(find.text('Invite Staff'), findsOneWidget);
     expect(find.text('Clinic *'), findsOneWidget); // platform admin picks the clinic
+  });
+
+  testWidgets('receptionist on PC: registers a walk-in, books a doctor, confirms in the clinic queue', (tester) async {
+    final patients = _Patients(_profile('RECEPTIONIST'));
+    final records = _Records();
+    final appointments = _Appointments();
+    await _pumpApp(tester, 'RECEPTIONIST', '/doctor/patients',
+        patients: patients, records: records, appointments: appointments);
+    // Front desk nav: queue and patients, never visits or admin.
+    expect(find.text('Queue'), findsOneWidget);
+    expect(find.text('Patients'), findsOneWidget);
+    expect(find.text('New visit'), findsNothing);
+    expect(find.text('Staff'), findsNothing);
+
+    await tester.tap(find.text('Register patient'));
+    await tester.pumpAndSettle();
+    await tester.enterText(_field('Full name *'), 'Ravi Das');
+    await tester.enterText(_field('Mobile number *'), '9876543210');
+    await tester.enterText(_field('Date of birth * (YYYY-MM-DD)'), '1990-02-03');
+    await tester.tap(find.widgetWithText(FilledButton, 'Register'));
+    await tester.pumpAndSettle();
+    expect(patients.registered, {'name': 'Ravi Das', 'dob': '1990-02-03', 'phone': '9876543210'});
+
+    // The new patient is selected: demographics only, and no records call at all.
+    expect(find.text('MWH-NEW001'), findsWidgets); // search chip + panel
+    expect(find.text('Medical history is only visible to doctors.'), findsOneWidget);
+    expect(records.historyCalls, 0);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Walk-in'));
+    await tester.pumpAndSettle();
+    expect(find.text('Book with which doctor?'), findsOneWidget);
+    await tester.tap(find.text('Dr. Iyer'));
+    await tester.pumpAndSettle();
+    expect(appointments.walkIn, {'patient_id': 'p-new', 'doctor_id': 'd2'});
+
+    await tester.tap(find.text('Queue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Clinic Queue'), findsOneWidget);
+    // Every doctor at the clinic, each card naming theirs; no consult buttons.
+    expect(find.text('Dr. Rao'), findsOneWidget);
+    expect(find.text('Dr. Iyer'), findsOneWidget);
+    expect(find.textContaining('Start Consultation'), findsNothing);
+    await tester.tap(find.widgetWithText(FilledButton, 'Confirm')); // only the pending one has it
+    await tester.pumpAndSettle();
+    expect(appointments.confirmed, ['a1']);
+    expect(records.historyCalls, 0);
   });
 
   testWidgets('staff tab: email sign-in with a pending application lands on the pending screen', (tester) async {

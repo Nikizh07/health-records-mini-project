@@ -70,6 +70,28 @@ class PatientService {
     }
   }
 
+  /// POST /api/patients/register (patient:register): staff register a walk-in
+  /// with no account. A phone already on file is a 409 naming its health ID.
+  Future<Map<String, dynamic>> registerAtDesk({
+    required String idToken,
+    required String name,
+    required String dob, // YYYY-MM-DD
+    required String gender,
+    required String languagePref,
+    required String phone,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/patients/register',
+        data: {'name': name, 'dob': dob, 'gender': gender, 'language_pref': languagePref, 'phone': phone},
+        options: Options(headers: {'Authorization': 'Bearer $idToken'}),
+      );
+      return response.data['data'] as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw ApiException.fromDioException(e);
+    }
+  }
+
   /// POST /api/patients/claim: links a clinic-registered profile to this phone
   /// sign-in when [dob] (YYYY-MM-DD) matches. Returns the profile.
   Future<Map<String, dynamic>> claimPatient({required String idToken, required String dob}) async {

@@ -1,6 +1,6 @@
 # Plan: Registration, RBAC and patient consent
 
-**Status (2026-09-15): Phases 1–3 done. Phases 4 and 5 built and tested; their click-throughs in a real browser are pending. Phases 6–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
+**Status (2026-09-15): Phases 1–3 done. Phases 4–6 built and tested; their click-throughs in a real browser are pending. Phases 7–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
 
 ## Context
 
@@ -272,7 +272,9 @@ Every allowed read of patient data writes a `PatientAccessLog` row.
 
 **Done when:** a patient registered by staff signs in on their phone, enters their DOB, and sees their profile.
 
-## Phase 6: Receptionist front desk
+## Phase 6: Receptionist front desk 🟡 built 2026-09-15, user click-through pending
+
+*As built:* the scoping below was already in place from Phase 2; the backend adds `PATCH /appointments/:id/confirm`. The app reuses the queue and patient lookup screens by permission instead of new routes (see `MEMORY.md`).
 
 **Goal:** a receptionist runs the clinic queue and registers walk-ins, and never sees records.
 

@@ -16,7 +16,7 @@ class DashboardScreen extends ConsumerWidget {
   static const _staffActions = [
     (Icons.calendar_today_outlined, "Today's Appointments", 'View queue and scheduled consultations', '/doctor/today-appointments'),
     (Icons.post_add_outlined, 'Add Visit Record', 'Log diagnoses, prescriptions & lab results', '/doctor/add-record'),
-    (Icons.person_search_outlined, 'Patient Lookup', 'Search a patient and view their clinical history', '/doctor/patients'),
+    (Icons.person_search_outlined, 'Patient Lookup', 'Find a patient by name or Health ID', '/doctor/patients'),
     (Icons.badge_outlined, 'Staff', 'Invite staff, review doctor applications', '/admin/staff'),
     (Icons.apartment_outlined, 'Manage Clinics', 'Configure clinics, branches and schedules', '/admin/clinics'),
   ];
@@ -44,6 +44,10 @@ class DashboardScreen extends ConsumerWidget {
     } else if (role == 'ADMIN') {
       headerBadge = 'System Administrator';
       headerIcon = Icons.admin_panel_settings_outlined;
+    } else if (role != 'PATIENT') {
+      // Receptionist / clinic admin: no health ID, name the clinic instead.
+      headerBadge = (authState.patientProfile?['clinic'] as Map?)?['name']?.toString() ?? 'Clinic staff';
+      headerIcon = Icons.apartment_outlined;
     }
 
     return Scaffold(

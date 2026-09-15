@@ -9,6 +9,7 @@
 //   - GET    /api/appointments          → appointment:manage
 //   - PUT    /api/appointments/:id      → self:profile (own) or appointment:manage (scoped)
 //   - PATCH  /api/appointments/:id/cancel → self:profile (own) or appointment:manage (scoped)
+//   - PATCH  /api/appointments/:id/confirm → appointment:manage (scoped)
 // ============================================================
 
 'use strict';
@@ -59,5 +60,12 @@ router.put('/:id', requirePermission('self:profile', 'appointment:manage'), appo
  * @access  Private — self:profile (own) or appointment:manage (scoped)
  */
 router.patch('/:id/cancel', requirePermission('self:profile', 'appointment:manage'), appointmentCtrl.cancelAppointment);
+
+/**
+ * @route   PATCH /api/appointments/:id/confirm
+ * @desc    Confirm a pending appointment (pending → confirmed)
+ * @access  Private — appointment:manage (scoped)
+ */
+router.patch('/:id/confirm', requirePermission('appointment:manage'), appointmentCtrl.confirmAppointment);
 
 module.exports = router;

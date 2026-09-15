@@ -25,7 +25,7 @@ class ClinicShell extends ConsumerWidget {
   static const routePermissions = {
     '/doctor/today-appointments': 'appointment:manage',
     '/doctor/add-record': 'record:write',
-    '/doctor/patients': 'record:read',
+    '/doctor/patients': 'patient:lookup', // history inside needs record:read
     '/admin/staff': 'staff:manage',
     '/admin/clinics': 'clinic:update',
   };

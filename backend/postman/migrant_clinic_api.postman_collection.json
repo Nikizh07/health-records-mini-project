@@ -1056,7 +1056,53 @@
           }
         },
         {
-          "name": "6. Cancel Appointment (Soft Cancel)",
+          "name": "6. Confirm Appointment (appointment:manage)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Appointment status is confirmed\", function () {",
+                  "    pm.expect(json.data.status).to.eql(\"confirmed\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{doctor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/appointments/{{appointment_id}}/confirm",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "appointments",
+                "{{appointment_id}}",
+                "confirm"
+              ]
+            }
+          }
+        },
+        {
+          "name": "7. Cancel Appointment (Soft Cancel)",
           "event": [
             {
               "listen": "test",

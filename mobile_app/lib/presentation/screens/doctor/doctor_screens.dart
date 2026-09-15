@@ -9,6 +9,7 @@ import '../../../providers/doctor_provider.dart';
 import '../../../providers/records_provider.dart';
 import '../../widgets/responsive_card_list.dart';
 import '../clinic/clinic_shell.dart';
+import '../reception/reception_screens.dart';
 
 // ============================================================================
 // 1. DOCTOR'S "TODAY'S APPOINTMENTS" SCREEN (Day 20 - Task 1)
@@ -23,6 +24,9 @@ class DoctorTodayAppointmentsScreen extends ConsumerWidget {
     final selectedDate = ref.watch(doctorSelectedDateProvider);
     final statusFilter = ref.watch(doctorStatusFilterProvider);
     final appointmentsAsync = ref.watch(doctorTodayAppointmentsProvider);
+    // Staff without record access (front desk) see every doctor at the clinic
+    // and confirm/cancel instead of consulting.
+    final frontDesk = !ref.watch(authNotifierProvider).can('record:write');
 
     final isToday = _isSameDay(selectedDate, DateTime.now());
     final dateDisplay = isToday
@@ -32,7 +36,7 @@ class DoctorTodayAppointmentsScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: const Text("Doctor Queue"),
+        title: Text(frontDesk ? 'Clinic Queue' : 'Doctor Queue'),
         elevation: 0,
         actions: [
           IconButton(
@@ -267,6 +271,7 @@ class DoctorTodayAppointmentsScreen extends ConsumerWidget {
                           appt['clinic'] as Map<String, dynamic>? ?? {};
                       return _DoctorAppointmentCard(
                         appointment: appt,
+                        frontDesk: frontDesk,
                         onConsult: () {
                           // ── Change A: pass a clean typed map as go_router extra ──
                           // We extract only the fields the form needs so it never has
@@ -331,10 +336,12 @@ class DoctorTodayAppointmentsScreen extends ConsumerWidget {
 class _DoctorAppointmentCard extends StatelessWidget {
   final Map<String, dynamic> appointment;
   final VoidCallback onConsult;
+  final bool frontDesk;
 
   const _DoctorAppointmentCard({
     required this.appointment,
     required this.onConsult,
+    this.frontDesk = false,
   });
 
   @override
@@ -358,6 +365,7 @@ class _DoctorAppointmentCard extends StatelessWidget {
     final healthId = patient['health_id']?.toString() ?? 'MWH-N/A';
     final phone = patient['phone']?.toString() ?? 'No phone';
     final clinicName = clinic['name']?.toString() ?? 'Clinic';
+    final doctorName = (appointment['doctor'] as Map?)?['name']?.toString() ?? 'Doctor';
 
     Color statusColor;
     Color statusBgColor;
@@ -504,11 +512,14 @@ class _DoctorAppointmentCard extends StatelessWidget {
             const SizedBox(height: 6),
             Row(
               children: [
-                Icon(Icons.apartment_outlined, size: 16, color: Colors.grey.shade600),
+                Icon(frontDesk ? Icons.medical_services_outlined : Icons.apartment_outlined,
+                    size: 16, color: Colors.grey.shade600),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    clinicName,
+                    frontDesk
+                        ? (doctorName.startsWith('Dr.') ? doctorName : 'Dr. $doctorName')
+                        : clinicName,
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.grey.shade700,
@@ -522,6 +533,9 @@ class _DoctorAppointmentCard extends StatelessWidget {
             const SizedBox(height: 14),
 
             // Action Button
+            if (frontDesk)
+              FrontDeskQueueActions(appointment: appointment)
+            else
             SizedBox(
               width: double.infinity,
               child: isCompleted
@@ -2201,31 +2215,51 @@ final _patientHistoryProvider = FutureProvider.autoDispose
       .getPatientRecords(idToken: token, patientId: patientId);
 });
 
-class DoctorPatientLookupScreen extends StatefulWidget {
+class DoctorPatientLookupScreen extends ConsumerStatefulWidget {
   const DoctorPatientLookupScreen({super.key});
 
   @override
-  State<DoctorPatientLookupScreen> createState() =>
+  ConsumerState<DoctorPatientLookupScreen> createState() =>
       _DoctorPatientLookupScreenState();
 }
 
-class _DoctorPatientLookupScreenState extends State<DoctorPatientLookupScreen> {
+class _DoctorPatientLookupScreenState extends ConsumerState<DoctorPatientLookupScreen> {
   Map<String, dynamic>? _patient;
 
   @override
   Widget build(BuildContext context) {
+    final auth = ref.watch(authNotifierProvider);
     final search = _PatientSearchSection(
       selectedPatient: _patient,
       onPatientSelected: (p) =>
           setState(() => _patient = p['_clear'] == true ? null : p),
     );
+    // Front desk (no record:read) gets demographics and a walk-in, never history.
     final history = _patient == null
-        ? const _LookupHint()
-        : _PatientHistory(patient: _patient!);
+        ? _LookupHint(clinical: auth.can('record:read'))
+        : auth.can('record:read')
+            ? _PatientHistory(patient: _patient!)
+            : FrontDeskPatientPanel(patient: _patient!);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
-      appBar: AppBar(title: const Text('Patient Lookup')),
+      appBar: AppBar(
+        title: const Text('Patient Lookup'),
+        actions: [
+          if (auth.can('patient:register'))
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: TextButton.icon(
+                onPressed: () async {
+                  final created = await showRegisterPatientDialog(context);
+                  if (created != null && mounted) setState(() => _patient = created);
+                },
+                icon: const Icon(Icons.person_add_alt_1_outlined),
+                label: const Text('Register patient'),
+              ),
+            ),
+        ],
+      ),
       body: LayoutBuilder(builder: (context, constraints) {
         // PC: search on the left, history on the right.
         if (constraints.maxWidth >= 900) {
@@ -2259,7 +2293,9 @@ class _DoctorPatientLookupScreenState extends State<DoctorPatientLookupScreen> {
 }
 
 class _LookupHint extends StatelessWidget {
-  const _LookupHint();
+  final bool clinical;
+
+  const _LookupHint({required this.clinical});
 
   @override
   Widget build(BuildContext context) {
@@ -2270,7 +2306,9 @@ class _LookupHint extends StatelessWidget {
           Icon(Icons.person_search_outlined, size: 56, color: Colors.grey.shade400),
           const SizedBox(height: 12),
           Text(
-            'Search for a patient to see their medical history across all clinics.',
+            clinical
+                ? 'Search for a patient to see their medical history across all clinics.'
+                : 'Search for a patient to book a walk-in, or register someone new.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey.shade600),
           ),

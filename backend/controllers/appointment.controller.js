@@ -8,6 +8,7 @@
 // 3. GET    /api/appointments          — Doctor (own schedule) / clinic staff (own clinic)
 // 4. PUT    /api/appointments/:id      — Patient (own) or staff in scope reschedules (with conflict check)
 // 5. PATCH  /api/appointments/:id/cancel — Patient (own) or staff in scope cancels (soft cancel)
+// 6. PATCH  /api/appointments/:id/confirm — Staff in scope confirm a pending booking
 // ============================================================
 
 'use strict';
@@ -643,10 +644,43 @@ async function cancelAppointment(req, res, next) {
   }
 }
 
+/**
+ * ------------------------------------------------------------
+ * 6. PATCH /api/appointments/:id/confirm
+ * ------------------------------------------------------------
+ * Staff in scope confirm a pending booking (the front desk's main job).
+ * ------------------------------------------------------------
+ */
+async function confirmAppointment(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!UUID_REGEX.test(id)) {
+      return res.status(400).json({ success: false, error: 'Bad Request', message: 'Appointment ID in URL parameter must be a valid UUID.' });
+    }
+    const appointment = await prisma.appointment.findUnique({ where: { id } });
+    if (!appointment) {
+      return res.status(404).json({ success: false, error: 'Not Found', message: `Appointment with ID "${id}" does not exist.` });
+    }
+    if (outsideStaffScope(req.user, appointment)) {
+      return res.status(403).json({ success: false, error: 'Forbidden', message: 'You can only confirm appointments on your own schedule or at your own clinic.' });
+    }
+    // Conditional update, so two desks confirming at once can't both "win" on a stale read.
+    const { count } = await prisma.appointment.updateMany({ where: { id, status: 'pending' }, data: { status: 'confirmed' } });
+    if (count === 0) {
+      return res.status(400).json({ success: false, error: 'Bad Request', message: `Only a pending appointment can be confirmed (this one is ${appointment.status}).` });
+    }
+    const confirmed = await prisma.appointment.findUnique({ where: { id }, include: APPOINTMENT_INCLUDE });
+    return res.status(200).json({ success: true, message: 'Appointment confirmed.', data: confirmed });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   bookAppointment,
   getMyAppointments,
   getAppointments,
   rescheduleAppointment,
   cancelAppointment,
+  confirmAppointment,
 };

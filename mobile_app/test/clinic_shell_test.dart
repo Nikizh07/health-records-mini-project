@@ -22,6 +22,7 @@ void main() {
     expect(ClinicShell.canAccess('/doctor/today-appointments', _patient), isFalse);
     expect(ClinicShell.canAccess('/doctor/today-appointments', _receptionist), isTrue);
     expect(ClinicShell.canAccess('/doctor/add-record', _receptionist), isFalse);
+    expect(ClinicShell.canAccess('/doctor/patients', _receptionist), isTrue); // front desk lookup, no history
     expect(ClinicShell.canAccess('/doctor/today-appointments', _pending), isFalse);
     expect(ClinicShell.canAccess('/doctor/unknown-page', _doctor), isFalse);
     expect(ClinicShell.canAccess('/records', _patient), isTrue);

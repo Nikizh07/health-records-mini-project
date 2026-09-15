@@ -105,17 +105,19 @@ class AppointmentService {
     }
   }
 
-  /// Doctor/admin creates an on-the-spot (walk-in) appointment for a patient.
-  /// The backend defaults the doctor to the caller, the clinic to theirs and
-  /// the time to now, and marks it confirmed.
+  /// Clinic staff create an on-the-spot (walk-in) appointment for a patient.
+  /// The backend defaults the doctor to the caller (front desk must pass
+  /// [doctorId]), the clinic to that doctor's and the time to now, and marks
+  /// it confirmed.
   Future<Map<String, dynamic>> createWalkIn({
     required String idToken,
     required String patientId,
+    String? doctorId,
   }) async {
     try {
       final response = await _dio.post(
         '/appointments',
-        data: {'patient_id': patientId},
+        data: {'patient_id': patientId, 'doctor_id': ?doctorId},
         options: Options(headers: {'Authorization': 'Bearer $idToken'}),
       );
 
@@ -240,6 +242,22 @@ class AppointmentService {
         return response.data['data'] as Map<String, dynamic>;
       }
       throw ApiException(response.data['message']?.toString() ?? 'Cancellation failed.');
+    } on DioException catch (e) {
+      throw ApiException.fromDioException(e);
+    }
+  }
+
+  /// PATCH /api/appointments/:id/confirm (staff): pending → confirmed.
+  Future<Map<String, dynamic>> confirmAppointment({
+    required String idToken,
+    required String appointmentId,
+  }) async {
+    try {
+      final response = await _dio.patch(
+        '/appointments/$appointmentId/confirm',
+        options: Options(headers: {'Authorization': 'Bearer $idToken'}),
+      );
+      return response.data['data'] as Map<String, dynamic>;
     } on DioException catch (e) {
       throw ApiException.fromDioException(e);
     }
