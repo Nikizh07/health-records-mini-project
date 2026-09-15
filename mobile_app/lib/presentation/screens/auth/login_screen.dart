@@ -16,12 +16,44 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   final String _selectedCountryCode = '+91';
+
+  /// Staff mostly use the web portal; patients mostly use the phone app.
+  bool _staff = kIsWeb;
+
+  static final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
   @override
   void dispose() {
     _phoneController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
     super.dispose();
+  }
+
+  void _handleEmail({bool create = false}) {
+    if (_formKey.currentState?.validate() ?? false) {
+      ref
+          .read(authNotifierProvider.notifier)
+          .signInWithEmail(_emailController.text, _passwordController.text, create: create);
+    }
+  }
+
+  Future<void> _handleForgotPassword() async {
+    final email = _emailController.text.trim();
+    final messenger = ScaffoldMessenger.of(context);
+    if (!_emailPattern.hasMatch(email)) {
+      messenger.showSnackBar(const SnackBar(content: Text('Enter your email address first.')));
+      return;
+    }
+    try {
+      await ref.read(authNotifierProvider.notifier).sendPasswordReset(email);
+      messenger.showSnackBar(SnackBar(content: Text('Password reset link sent to $email.')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red.shade700));
+    }
   }
 
   void _handleSendOtp() {
@@ -42,10 +74,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // snackbar appears twice.
       if (ModalRoute.of(context)?.isCurrent != true) return;
 
-      if (next.status == AuthStatus.authenticated) {
-        context.go('/');
-      } else if (next.status == AuthStatus.needsRegistration) {
-        context.go('/register');
+      if (next.route != null) {
+        context.go(next.route!);
       } else if (next.status == AuthStatus.otpSent) {
         context.push('/verify-otp');
       } else if (next.status == AuthStatus.error && next.errorMessage != null) {
@@ -116,8 +146,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 14, color: AppColors.textMuted, height: 1.4),
                     ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 24),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(value: false, label: Text('Patient'), icon: Icon(Icons.person_outline)),
+                        ButtonSegment(value: true, label: Text('Clinic staff'), icon: Icon(Icons.badge_outlined)),
+                      ],
+                      selected: {_staff},
+                      onSelectionChanged: (s) => setState(() => _staff = s.first),
+                    ),
+                    const SizedBox(height: 16),
 
+                    if (_staff)
+                      _staffCard(authState, muted)
+                    else
                     // Phone sign-in
                     Card(
                       margin: EdgeInsets.zero,
@@ -194,7 +236,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     // Guest login is for local testing only: hidden in release
                     // builds (debug + the profile `web-doctor` build keep it),
                     // and the backend refuses anonymous tokens in production.
-                    if (!kReleaseMode) ...[
+                    if (!kReleaseMode && !_staff) ...[
                       const SizedBox(height: 20),
                       const Row(
                         children: [
@@ -238,6 +280,79 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _staffCard(AuthState authState, TextStyle muted) {
+    final busy = authState.isLoading;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: AutofillGroup(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Clinic staff sign-in', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              Text('Doctors, receptionists and clinic administrators.', style: muted),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
+                decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email_outlined)),
+                validator: (v) => _emailPattern.hasMatch(v?.trim() ?? '') ? null : 'Enter a valid email address',
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _passwordController,
+                obscureText: true,
+                autofillHints: const [AutofillHints.password],
+                onFieldSubmitted: (_) => _handleEmail(),
+                decoration: const InputDecoration(labelText: 'Password', prefixIcon: Icon(Icons.lock_outline)),
+                validator: (v) => (v ?? '').length < 6 ? 'At least 6 characters' : null,
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: busy ? null : _handleForgotPassword,
+                  child: const Text('Forgot password?'),
+                ),
+              ),
+              FilledButton(
+                onPressed: busy ? null : _handleEmail,
+                child: busy
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                      )
+                    : const Text('Sign in'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: busy ? null : () => _handleEmail(create: true),
+                child: const Text('Create account'),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Expanded(child: Divider()),
+                  Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Text('or', style: muted)),
+                  const Expanded(child: Divider()),
+                ],
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: busy ? null : () => ref.read(authNotifierProvider.notifier).signInWithGoogle(),
+                icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
+                label: const Text('Continue with Google'),
+              ),
+            ],
           ),
         ),
       ),

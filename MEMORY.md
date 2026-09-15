@@ -35,7 +35,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - ~~Known gap: same-visit pairs don't fire~~ — closed 2026-09-12.
 
 ## Planned: registration, RBAC and patient consent
-- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-3 done (2026-09-15); next is Phase 4 (staff sign-in UI), or 5/7.**
+- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-3 done; Phase 4 built and tested (2026-09-15), user click-through pending; next is 5 or 7.**
 - Split into 8 phases, one migration per phase (2026-09-13):
   1. identity hardening
   2. roles + permission table
@@ -69,6 +69,23 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-15: Auth/RBAC Phase 4 — staff sign-in and onboarding UI.** App only; no backend change.
+  - `auth_service.dart`: `signInWithEmail`, `signUpWithEmail` (sends the verification email), `sendEmailVerification`, `sendPasswordReset`, `signInWithGoogle` (popup on web, `signInWithProvider` on mobile), `reloadUser`. No new packages.
+  - `PatientService.getMyProfile` now returns `{'next': ...}` on a 404 instead of null. `statusForProfile()` in `auth_provider.dart` maps it: `VERIFY_EMAIL` → `needsEmailVerification`, `STAFF_APPLY` → `needsStaffApplication`, a `PENDING` profile → `pendingApproval`. Only real profiles are cached.
+  - **`AuthState.route` is the one place that says where a session belongs** (`/`, `/register`, `/verify-email`, `/staff-apply`). The login, OTP, verify and apply screens and `ClinicShell` all navigate by it, so a web reload on any shell URL with an unverified or pending account is redirected too (before, an unregistered restore landed on an empty dashboard).
+  - Login: a Patient / Clinic staff segmented switch, staff by default on web (`kIsWeb`). Guest login shows only on the patient side.
+  - New `auth/email_verification_screen.dart` (I've verified → `recheck()` reloads the Firebase user and re-reads `/me`) and `auth/staff_application_screen.dart` (form, then "Waiting for approval" with Check again).
+  - `/admin/doctors` is now **`/admin/staff`** (`AdminStaffScreen`): Applications / Staff / Invites tabs, approve, reject and disable with a confirm, enable a disabled account (approve endpoint), and an invite dialog. The clinic picker shows only for a platform ADMIN; a CLINIC_ADMIN's invite goes to their own clinic by API default. The old doctor directory, `adminDoctorsProvider`, `AdminService.getAllDoctors/createDoctor` are deleted; `POST /doctors` stays for Postman.
+  - **Strings are not in l10n**, although the plan said so: the login, admin and doctor screens they sit in are English-only today. Move them with the rest of the staff UI if Hindi/Tamil staff screens are ever wanted.
+  - Tests: `flutter analyze` clean; `flutter test` 14 passed, 2 skipped. New cases: Staff screen (approve, disable with confirm, invites, invite dialog), staff-tab email sign-in → pending screen, unverified email redirected from `/admin/staff` to verification.
+  - **Gotcha:** on PC a snackbar is shown by the shell's full-width Scaffold, so it covers the page's FAB for its 4 s (queued snackbars stack up). The widget test clears snackbars before tapping *Invite*.
+  - Not done: the plan's four browser steps (invite → sign up → verify → portal; self-apply → pending → approve → portal).
+  - **Firebase project config (2026-09-15, project `migrant-workers-89bb8`), checked and set through the API with the backend service account** (`google-auth-library` from `backend/node_modules`; Identity Toolkit admin v2 `projects/<id>/config`, Firebase Management `androidApps/<appId>/sha`):
+    - Email/Password was **already enabled**. Authorized domains are `localhost` + the two Firebase domains (ports don't matter, so :5000/:5001 work).
+    - Added the local debug keystore SHA-1 `20:5D:43:DD:…:5F:33` and SHA-256 to the Android app.
+    - **Google cannot be enabled through the API**: `defaultSupportedIdpConfigs` needs an OAuth client ID + secret, which only the console creates. The user enabled it in the console on 2026-09-15.
+    - **Gotcha:** the `config` GET response includes `signIn.hashConfig.signerKey` (the password-hash key). Filter to the fields you need; never dump the whole response.
+    - **Gotcha:** CI APKs are signed with each runner's throwaway debug keystore, so Google sign-in fails on them until a fixed keystore (as a secret) is used and its SHA registered.
 - **2026-09-15: Auth/RBAC Phase 3 — staff onboarding API.**
   - Migration `20260915120000_add_staff_onboarding`: new `staff_invites`; `doctors` += `registration_number`, `registration_council`, `verified_at`, `verified_by_id`. `invited_by_id` is nullable because the data SQL inserts an invite for every unlinked doctor with no inviter. **Those legacy invites last 90 days, not 14**, so no pre-created doctor is stranded. Locally that was 4 seeded doctors (Sarah Tan, Rajiv Menon, Li Wei, Ananya Sharma).
   - New `routes/staff.routes.js` + `controllers/staff.controller.js`: `POST/GET /staff/invites`, `POST /staff/applications`, `GET /staff?status=`, `POST /staff/:userId/approve|reject|disable`.
@@ -158,7 +175,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
     - `API_BASE_URL` set to an `https://…` URL (after the AWS move) → **release** APK against it, automatically.
     - `workflow_dispatch` can override the URL and force `debug`/`release`; forcing release without HTTPS fails with an explicit message.
   - Output: artifact `apk-<mode>-<run number>`, file `migrant-health-<mode>-v<version>-<run>-<sha>.apk`, kept 30 days. `versionCode` is the run number, so each build is distinct.
-  - No secrets needed: the Android build has no `google-services` Gradle plugin, so Firebase comes from `lib/firebase_options.dart` and the gitignored `google-services.json` is not required. Release still signs with the debug keystore (`android/app/build.gradle.kts`) — fine for sideloading, not for Play.
+  - No secrets needed: the Android build has no `google-services` Gradle plugin, so Firebase comes from `lib/firebase_options.dart` and `google-services.json` is not read by the build (it is tracked in git, not gitignored; checked 2026-09-15, so a re-downloaded copy from the console need not replace it). Release still signs with the debug keystore (`android/app/build.gradle.kts`) — fine for sideloading, not for Play.
   - **Gotcha found:** the existing backend workflow is `.github/workflows/deploy-container` with **no `.yml` extension**, so GitHub Actions has never run it. Left as is — rename it to `deploy-container.yml` to turn it on.
 - **2026-09-11: Walk-in (on-the-spot) appointments.**
   - `POST /api/appointments` is now open to DOCTOR/ADMIN as well. For staff callers it takes `patient_id` from the body. The doctor defaults to the caller (`getAuthenticatedDoctorId`, now exported from `record.controller.js`), the clinic to that doctor's clinic, and the time to now. Status is `confirmed`, where patient bookings stay `pending`.

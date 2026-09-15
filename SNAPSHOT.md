@@ -8,7 +8,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-3 done
+├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-4 built
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
@@ -112,24 +112,27 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   │   ├── theme/app_colors.dart, app_theme.dart
     │   │   └── utils/app_logger.dart
     │   ├── data/services/
-    │   │   ├── auth_service.dart, secure_storage_service.dart, local_cache_service.dart
+    │   │   ├── auth_service.dart      # phone OTP, guest, email/password, Google
+    │   │   ├── secure_storage_service.dart, local_cache_service.dart
     │   │   ├── patient_service.dart, appointment_service.dart
     │   │   ├── record_service.dart   # records + checkDrugInteractions (pre-flight)
-    │   │   ├── admin_service.dart
+    │   │   ├── admin_service.dart     # clinics
+    │   │   ├── staff_service.dart     # /staff: invites, applications, approve/reject/disable
     │   ├── providers/
     │   │   ├── app_providers.dart, auth_provider.dart, locale_provider.dart
     │   │   ├── appointment_provider.dart, records_provider.dart
-    │   │   ├── doctor_provider.dart, admin_provider.dart
+    │   │   ├── doctor_provider.dart, admin_provider.dart (clinics, staff list, invites)
     │   ├── presentation/
     │   │   ├── screens/
-    │   │   │   ├── auth/          # login, otp_verification, patient_registration
+    │   │   │   ├── auth/          # login (Patient / Clinic staff tabs), otp_verification, patient_registration,
+    │   │   │   │                  # email_verification, staff_application (apply form + awaiting approval)
     │   │   │   ├── dashboard/     # dashboard_screen (+ chatbot placeholder) + widgets/dashboard_header_card
     │   │   │   ├── appointments/  # appointments_screen, book_appointment_screen
     │   │   │   ├── records/       # records_screen, record_detail_screen (opens report URL)
     │   │   │   ├── clinic/clinic_shell.dart   # wraps signed-in routes: auth wait, permission gate, permission-filtered staff side nav on wide screens
     │   │   │   ├── doctor/doctor_screens.dart # queue, add visit record, patient lookup;
     │   │   │   │                              # _InteractionBanner = drug conflict warning + override reason
-    │   │   │   ├── admin/admin_screens.dart   # manage doctors, manage clinics
+    │   │   │   ├── admin/admin_screens.dart   # Staff (applications / staff / invites tabs + invite dialog), manage clinics
     │   │   │   └── profile/profile_screen.dart
     │   │   └── widgets/           # app_error_view, custom_card, offline_banner, responsive_card_list
     │   └── l10n/                  # app_en/hi/ta.arb + generated/

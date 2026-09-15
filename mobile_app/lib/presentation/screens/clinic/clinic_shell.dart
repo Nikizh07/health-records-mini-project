@@ -26,7 +26,7 @@ class ClinicShell extends ConsumerWidget {
     '/doctor/today-appointments': 'appointment:manage',
     '/doctor/add-record': 'record:write',
     '/doctor/patients': 'record:read',
-    '/admin/doctors': 'staff:manage',
+    '/admin/staff': 'staff:manage',
     '/admin/clinics': 'clinic:update',
   };
 
@@ -44,7 +44,7 @@ class ClinicShell extends ConsumerWidget {
     (Icons.calendar_today_outlined, 'Queue', '/doctor/today-appointments'),
     (Icons.post_add_outlined, 'New visit', '/doctor/add-record'),
     (Icons.person_search_outlined, 'Patients', '/doctor/patients'),
-    (Icons.medical_services_outlined, 'Doctors', '/admin/doctors'),
+    (Icons.badge_outlined, 'Staff', '/admin/staff'),
     (Icons.apartment_outlined, 'Clinics', '/admin/clinics'),
     (Icons.account_circle_outlined, 'Profile', '/profile'),
   ];
@@ -56,9 +56,12 @@ class ClinicShell extends ConsumerWidget {
     if (auth.status == AuthStatus.restoring) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    if (auth.status == AuthStatus.initial) {
+    // Signed out, or signed in without a usable profile (unregistered,
+    // unverified email, pending application): send them to that step.
+    final redirect = auth.status == AuthStatus.initial ? '/login' : auth.route;
+    if (redirect != null && redirect != '/') {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) context.go('/login');
+        if (context.mounted) context.go(redirect);
       });
       return const Scaffold();
     }

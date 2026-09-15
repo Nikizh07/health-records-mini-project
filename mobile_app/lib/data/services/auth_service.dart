@@ -110,4 +110,29 @@ class AuthService {
   Future<UserCredential> signInAsGuest() async {
     return await _auth.signInAnonymously();
   }
+
+  // Staff sign-in (email/password and Google). Both providers must be enabled
+  // in the Firebase console; Google on Android also needs the app's SHA-1.
+
+  Future<UserCredential> signInWithEmail(String email, String password) =>
+      _auth.signInWithEmailAndPassword(email: email, password: password);
+
+  /// Creates the account and sends the verification email: the backend only
+  /// accepts an invite or an application from a verified email.
+  Future<UserCredential> signUpWithEmail(String email, String password) async {
+    final credential = await _auth.createUserWithEmailAndPassword(email: email, password: password);
+    await credential.user?.sendEmailVerification();
+    return credential;
+  }
+
+  Future<void> sendEmailVerification() async => _auth.currentUser?.sendEmailVerification();
+
+  Future<void> sendPasswordReset(String email) => _auth.sendPasswordResetEmail(email: email);
+
+  Future<UserCredential> signInWithGoogle() => kIsWeb
+      ? _auth.signInWithPopup(GoogleAuthProvider())
+      : _auth.signInWithProvider(GoogleAuthProvider());
+
+  /// Picks up `emailVerified` after the user clicks the link in the email.
+  Future<void> reloadUser() async => _auth.currentUser?.reload();
 }

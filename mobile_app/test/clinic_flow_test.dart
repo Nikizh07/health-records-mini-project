@@ -12,22 +12,38 @@ import 'package:mobile_app/data/services/local_cache_service.dart';
 import 'package:mobile_app/data/services/patient_service.dart';
 import 'package:mobile_app/data/services/record_service.dart';
 import 'package:mobile_app/data/services/secure_storage_service.dart';
+import 'package:mobile_app/data/services/staff_service.dart';
 import 'package:mobile_app/l10n/generated/app_localizations.dart';
 import 'package:mobile_app/providers/admin_provider.dart';
 import 'package:mobile_app/providers/auth_provider.dart';
 import 'package:mobile_app/providers/records_provider.dart';
 import 'package:mobile_app/routes/app_router.dart';
 
+class _Credential implements UserCredential {
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
 class _Auth implements AuthService {
+  String? signedInEmail;
   @override
   User? get currentUser => null;
+  @override
+  Future<UserCredential> signInWithEmail(String email, String password) async {
+    signedInEmail = email;
+    return _Credential();
+  }
+  @override
+  Future<String?> getIdToken({bool forceRefresh = false}) async => 'test-token';
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
 class _Storage implements SecureStorageService {
+  _Storage({this.token = 'test-token'});
+  final String? token;
   @override
-  Future<String?> getToken() async => 'test-token';
+  Future<String?> getToken() async => token;
   @override
   Future<String?> getPhoneNumber() async => null;
   @override
@@ -126,21 +142,43 @@ class _Admin extends AdminService {
   _Admin() : super(dio: Dio());
 
   @override
-  Future<List<Map<String, dynamic>>> getAllDoctors({required String idToken, String? clinicId}) async => [
-        {'id': 'd1', 'name': 'Rao', 'specialization': 'GP', 'phone': '+911', 'clinic': {'name': 'Central'}},
-        {'id': 'd2', 'name': 'Iyer', 'specialization': 'Dermatology', 'phone': '+912', 'clinic': {'name': 'North'}},
-      ];
-
-  @override
   Future<List<Map<String, dynamic>>> getAllClinics({required String idToken}) async => [
         {'id': 'c1', 'name': 'Central', 'location': 'Sector 4', 'contact_number': '+913'},
       ];
+}
+
+class _Staff extends StaffService {
+  _Staff() : super(dio: Dio());
+  final actions = <String>[];
+
+  @override
+  Future<List<Map<String, dynamic>>> listStaff({required String idToken, String? status}) async => [
+        {'id': 'u1', 'email': 'rao@clinic.in', 'role': 'DOCTOR', 'status': 'ACTIVE', 'clinic': {'name': 'Central'},
+            'doctor': {'name': 'Dr. Rao', 'specialization': 'GP'}},
+        {'id': 'u2', 'email': 'iyer@clinic.in', 'role': 'DOCTOR', 'status': 'PENDING', 'clinic': {'name': 'Central'},
+            'doctor': {'name': 'Dr. Iyer', 'specialization': 'Dermatology', 'registration_number': 'TN-12345',
+                'registration_council': 'TNMC'}},
+        {'id': 'u3', 'phone': '+919000000003', 'role': 'RECEPTIONIST', 'status': 'ACTIVE', 'clinic': {'name': 'Central'}},
+      ];
+
+  @override
+  Future<List<Map<String, dynamic>>> listInvites({required String idToken}) async => [
+        {'id': 'i1', 'name': 'Meena', 'role': 'CLINIC_ADMIN', 'email': 'meena@clinic.in', 'state': 'OPEN',
+            'expires_at': '2026-09-29T00:00:00Z', 'clinic': {'name': 'Central'}},
+      ];
+
+  @override
+  Future<void> act({required String idToken, required String userId, required String action}) async =>
+      actions.add('$action $userId');
 }
 
 Map<String, dynamic> _profile(String role) => switch (role) {
       'DOCTOR' => {'id': 'd1', 'name': 'Dr. Rao', 'clinic': {'name': 'Central Clinic'}, 'user': {'role': 'DOCTOR'},
           'permissions': ['patient:register', 'patient:lookup', 'appointment:manage', 'record:read', 'record:write',
               'interaction:check', 'report:upload', 'consent:request', 'consent:emergency']},
+      'PENDING_DOCTOR' => {'name': 'Iyer', 'status': 'PENDING', 'permissions': <String>[],
+          'clinic': {'name': 'Central Clinic'}, 'user': {'role': 'DOCTOR'}},
+      'UNVERIFIED' => {'next': 'VERIFY_EMAIL'},
       'ADMIN' => {'name': 'System Administrator', 'role': 'ADMIN', 'user': {'role': 'ADMIN'},
           'permissions': ['staff:manage', 'clinic:update', 'clinic:create', 'audit:read']},
       _ => {'id': 'p9', 'name': 'Pat', 'health_id': 'MWH-X', 'user': {'role': 'PATIENT'},
@@ -152,6 +190,9 @@ Future<void> _pumpApp(
   String role,
   String location, {
   _Records? records,
+  _Staff? staff,
+  _Auth? auth,
+  String? token = 'test-token',
   Size size = const Size(1280, 800),
 }) async {
   tester.view.physicalSize = size;
@@ -160,11 +201,12 @@ Future<void> _pumpApp(
   appRouter.go(location);
   await tester.pumpWidget(ProviderScope(
     overrides: [
-      authServiceProvider.overrideWithValue(_Auth()),
-      secureStorageServiceProvider.overrideWithValue(_Storage()),
+      authServiceProvider.overrideWithValue(auth ?? _Auth()),
+      secureStorageServiceProvider.overrideWithValue(_Storage(token: token)),
       patientServiceProvider.overrideWithValue(_Patients(_profile(role))),
       recordServiceProvider.overrideWithValue(records ?? _Records()),
       adminServiceProvider.overrideWithValue(_Admin()),
+      staffServiceProvider.overrideWithValue(staff ?? _Staff()),
     ],
     child: MaterialApp.router(
       routerConfig: appRouter,
@@ -409,24 +451,73 @@ void main() {
     expect(records.created?['override_reason'], isNull);
   });
 
-  testWidgets('admin on PC: doctors in a grid, add-doctor opens as a dialog', (tester) async {
-    await _pumpApp(tester, 'ADMIN', '/admin/doctors');
+  testWidgets('admin on PC: staff screen approves an application, invite opens as a dialog', (tester) async {
+    final staff = _Staff();
+    await _pumpApp(tester, 'ADMIN', '/admin/staff', staff: staff);
     expect(find.byType(NavigationRail), findsOneWidget);
     // Admin nav is filtered by permission: no queue, visits or patient history.
     expect(find.text('Clinics'), findsOneWidget);
     expect(find.text('Queue'), findsNothing);
     expect(find.text('New visit'), findsNothing);
     expect(find.text('Patients'), findsNothing);
-    final a = tester.getTopLeft(find.text('Dr. Rao'));
-    final b = tester.getTopLeft(find.text('Dr. Iyer'));
-    expect(a.dy, b.dy); // side by side
-    expect(a.dx, lessThan(b.dx));
 
-    await tester.tap(find.text('Add Doctor'));
+    // Applications tab first: only the pending doctor, with the registration number to check.
+    expect(find.text('Applications (1)'), findsOneWidget);
+    expect(find.text('Dr. Iyer'), findsOneWidget);
+    expect(find.text('Dr. Rao'), findsNothing);
+    expect(find.text('Reg. no. TN-12345 (TNMC)'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
+    await tester.pumpAndSettle();
+    expect(staff.actions, ['approve u2']);
+
+    await tester.tap(find.text('Staff').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Dr. Rao'), findsOneWidget);
+    expect(find.text('+919000000003'), findsOneWidget); // receptionist named by phone
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Disable').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Disable')); // confirm
+    await tester.pumpAndSettle();
+    expect(staff.actions, ['approve u2', 'disable u1']);
+
+    await tester.tap(find.text('Invites'));
+    await tester.pumpAndSettle();
+    expect(find.text('Meena'), findsOneWidget);
+    expect(find.text('OPEN'), findsOneWidget);
+
+    // The action snackbars sit over the button on the shell's full-width Scaffold.
+    ScaffoldMessenger.of(tester.element(find.byType(TabBar))).clearSnackBars();
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FloatingActionButton, 'Invite'));
     await tester.pumpAndSettle();
     expect(find.byType(Dialog), findsOneWidget);
-    expect(find.byType(BottomSheet), findsNothing);
-    expect(find.text('Onboard New Doctor'), findsOneWidget);
+    expect(find.text('Invite Staff'), findsOneWidget);
+    expect(find.text('Clinic *'), findsOneWidget); // platform admin picks the clinic
+  });
+
+  testWidgets('staff tab: email sign-in with a pending application lands on the pending screen', (tester) async {
+    final auth = _Auth();
+    await _pumpApp(tester, 'PENDING_DOCTOR', '/login', auth: auth, token: null);
+    expect(find.text('Sign in with your mobile number'), findsOneWidget); // patient tab by default off web
+
+    await tester.tap(find.text('Clinic staff'));
+    await tester.pumpAndSettle();
+    expect(find.text('Continue with Google'), findsOneWidget);
+    expect(find.text('Continue as guest'), findsNothing);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Email'), 'iyer@clinic.in');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Password'), 'secret123');
+    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+    await tester.pumpAndSettle();
+
+    expect(auth.signedInEmail, 'iyer@clinic.in');
+    expect(find.text('Waiting for approval'), findsOneWidget);
+    expect(find.textContaining('Central Clinic'), findsOneWidget);
+  });
+
+  testWidgets('an unverified email is sent from any page to verification', (tester) async {
+    await _pumpApp(tester, 'UNVERIFIED', '/admin/staff');
+    expect(find.text('Verify your email'), findsOneWidget);
+    expect(find.text("I've verified"), findsOneWidget);
   });
 
   testWidgets('patient is blocked from admin pages', (tester) async {

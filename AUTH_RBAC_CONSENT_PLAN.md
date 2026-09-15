@@ -1,6 +1,6 @@
 # Plan: Registration, RBAC and patient consent
 
-**Status (2026-09-15): Phases 1–3 done. Phases 4–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
+**Status (2026-09-15): Phases 1–3 done. Phase 4 built and tested; its click-through in a real browser is pending. Phases 5–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
 
 ## Context
 
@@ -221,7 +221,7 @@ Every allowed read of patient data writes a `PatientAccessLog` row.
 
 **Done when:** the tests pass and the existing `POST /doctors` Postman request still works.
 
-## Phase 4: Staff sign-in and onboarding UI
+## Phase 4: Staff sign-in and onboarding UI 🟡 built 2026-09-15, user click-through pending
 
 **Goal:** staff can sign in with email or Google, verify email, apply, see a pending screen, and admins manage staff in the app.
 

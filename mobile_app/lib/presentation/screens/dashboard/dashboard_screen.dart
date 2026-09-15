@@ -17,7 +17,7 @@ class DashboardScreen extends ConsumerWidget {
     (Icons.calendar_today_outlined, "Today's Appointments", 'View queue and scheduled consultations', '/doctor/today-appointments'),
     (Icons.post_add_outlined, 'Add Visit Record', 'Log diagnoses, prescriptions & lab results', '/doctor/add-record'),
     (Icons.person_search_outlined, 'Patient Lookup', 'Search a patient and view their clinical history', '/doctor/patients'),
-    (Icons.medical_services_outlined, 'Manage Doctors', 'Onboard clinicians and assign specializations', '/admin/doctors'),
+    (Icons.badge_outlined, 'Staff', 'Invite staff, review doctor applications', '/admin/staff'),
     (Icons.apartment_outlined, 'Manage Clinics', 'Configure clinics, branches and schedules', '/admin/clinics'),
   ];
 

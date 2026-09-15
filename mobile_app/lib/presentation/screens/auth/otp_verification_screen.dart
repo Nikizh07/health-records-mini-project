@@ -74,12 +74,8 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
 
     // Listen to verification result
     ref.listen<AuthState>(authNotifierProvider, (previous, next) {
-      if (next.status == AuthStatus.authenticated) {
-        // Patient profile exists -> go directly to Dashboard
-        context.go('/');
-      } else if (next.status == AuthStatus.needsRegistration) {
-        // 404 from backend -> new patient profile registration
-        context.go('/register');
+      if (next.route != null) {
+        context.go(next.route!);
       } else if (next.status == AuthStatus.error && next.errorMessage != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

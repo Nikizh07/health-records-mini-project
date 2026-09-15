@@ -9,7 +9,8 @@ class PatientService {
       : _dio = dio ?? createApiClient();
 
   /// Calls GET /api/patients/me with the Firebase ID token in Authorization header.
-  /// Returns the patient data map if found, or null if 404 (needs registration).
+  /// Returns the profile map if found. On 404 (no profile yet) returns only
+  /// `{'next': 'REGISTER' | 'VERIFY_EMAIL' | 'STAFF_APPLY'}` from the backend.
   Future<Map<String, dynamic>?> getMyProfile(String idToken) async {
     try {
       final response = await _dio.get(
@@ -27,8 +28,8 @@ class PatientService {
       return null;
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
-        // Patient profile not yet created in the database
-        return null;
+        final data = e.response?.data;
+        return {'next': (data is Map ? data['next'] : null) ?? 'REGISTER'};
       }
       throw ApiException.fromDioException(e);
     }

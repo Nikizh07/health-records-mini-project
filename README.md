@@ -53,8 +53,9 @@ This project closes that gap with a **shared, multi-clinic health record system*
   - the other drugs in the **same prescription**
 
   If there's a conflict, a banner names the drugs, how serious it is and which clinic prescribed the existing drug. The doctor can still save, but has to give a reason, and every check is kept for audit.
-- **Admin portal**: manage clinics and doctors
-- **Role-based access** for PATIENT, DOCTOR and ADMIN, enforced by the backend
+- **Staff sign-in** with email + password or Google (phone OTP still works). Staff join by an admin's invite, or doctors apply with their registration number and wait for approval.
+- **Admin portal**: manage clinics, invite staff, approve or reject doctor applications, disable accounts
+- **Role-based access** for PATIENT, RECEPTIONIST, DOCTOR, CLINIC_ADMIN and ADMIN, enforced by the backend
 
 ---
 
@@ -65,7 +66,7 @@ This project closes that gap with a **shared, multi-clinic health record system*
 | Mobile / web app | Flutter (Dart), Riverpod, go_router, Dio, Hive (local cache) |
 | Backend API | Node.js 22, Express 4 |
 | Database | PostgreSQL 16, Prisma 7 (`@prisma/adapter-pg`) |
-| Authentication | Firebase Authentication (phone OTP + anonymous guest), verified server-side with `firebase-admin` |
+| Authentication | Firebase Authentication (phone OTP for patients; email/password and Google for staff; anonymous guest in test builds), verified server-side with `firebase-admin` |
 | File storage | Local disk via Multer (`backend/uploads/`). Moving to S3 is planned. |
 | Containers | Docker (backend image, local Postgres via Docker Compose) |
 | CI | GitHub Actions: `flutter analyze` + `flutter test`, and an installable Android APK on every push to `main` |
@@ -183,6 +184,8 @@ The clinic side (doctor/admin) is built for a PC browser. Keep the window at lea
    - In the Firebase console, go to Authentication → Sign-in method → Phone → *Phone numbers for testing* and add `+91 9999900001` with code `123456`.
    - Authentication → Settings → *SMS region policy* must allow India.
    - A doctor with that phone must exist. An admin can add one in the admin portal, or an API client can call `POST /api/doctors`. The first login with that number links the account as DOCTOR. To turn an existing account into a doctor instead, run `node backend/scripts/set-user-role.js <phone> DOCTOR "<name>" "<specialization>"`.
+   - **Email or Google staff sign-in** (the *Clinic staff* tab, default on web) needs Email/Password and Google enabled under Authentication → Sign-in method. `localhost` is an authorized domain by default; add any other web origin under Authentication → Settings → Authorized domains. Google on Android also needs the app's SHA-1 in the Firebase project settings.
+   - An admin invites staff from **Staff → Invite** (role, name, email or phone). No email is sent: the person signs in with that email (verified) or phone and lands on their portal. Without an invite, a verified email gets the doctor application form and waits on a pending screen until a clinic admin approves it under **Staff → Applications**.
 5. **The first admin** has to be created from the command line after that account has signed in once: `node backend/scripts/set-user-role.js <phone> ADMIN`.
 6. **The flow:**
    - The patient books *Central Migrant Health Hub* → the doctor, for today.
@@ -220,7 +223,7 @@ cd mobile_app && flutter analyze && flutter test
 ```bash
 cd backend && node scripts/test-interactions.js && node scripts/test-auth-rbac.js
 ```
-- `flutter test` covers the role gate and the doctor/admin screens. It uses the real router with fake services.
+- `flutter test` covers the role gate, the doctor/admin screens, staff email sign-in to the pending screen, and the Staff screen. It uses the real router with fake services.
 - `test-interactions.js` runs 112 drug interaction checks against the real API and database. Firebase and the AI provider are faked, so it needs no device or credentials, and it removes its own test data.
 - `test-auth-rbac.js` covers sign-in and role rules the same way: role from the database only, phone only from the verified token, doctors linked by exact phone, visits saved under the right doctor, guests refused in production.
 - `node scripts/test-ai-provider.js` sends one canned case to whichever AI provider `backend/.env` configures and prints the reply.

@@ -13,7 +13,7 @@ final _pending = _as([]);
 
 void main() {
   test('clinic permission gate', () {
-    expect(ClinicShell.canAccess('/admin/doctors', _admin), isTrue);
+    expect(ClinicShell.canAccess('/admin/staff', _admin), isTrue);
     expect(ClinicShell.canAccess('/admin/clinics', _doctor), isFalse);
     expect(ClinicShell.canAccess('/admin/clinics', _patient), isFalse);
     expect(ClinicShell.canAccess('/doctor/patients', _doctor), isTrue);

@@ -14,8 +14,20 @@ enum AuthStatus {
   verifying,
   authenticated,
   needsRegistration,
+  needsEmailVerification, // email sign-up, link not clicked yet
+  needsStaffApplication, // verified email, no invite: apply as a doctor
+  pendingApproval, // applied, waiting for a clinic admin
   error,
 }
+
+/// Status for a GET /patients/me result: a profile, or `{'next': ...}` on 404.
+AuthStatus statusForProfile(Map<String, dynamic>? profile) => switch (profile) {
+      {'next': 'VERIFY_EMAIL'} => AuthStatus.needsEmailVerification,
+      {'next': 'STAFF_APPLY'} => AuthStatus.needsStaffApplication,
+      null || {'next': _} => AuthStatus.needsRegistration,
+      {'status': 'PENDING'} => AuthStatus.pendingApproval,
+      _ => AuthStatus.authenticated,
+    };
 
 class AuthState {
   final AuthStatus status;
@@ -36,6 +48,15 @@ class AuthState {
 
   bool get isLoading =>
       status == AuthStatus.otpSending || status == AuthStatus.verifying;
+
+  /// The page this session belongs on, or null while signing in.
+  String? get route => switch (status) {
+        AuthStatus.authenticated => '/',
+        AuthStatus.needsRegistration => '/register',
+        AuthStatus.needsEmailVerification => '/verify-email',
+        AuthStatus.needsStaffApplication || AuthStatus.pendingApproval => '/staff-apply',
+        _ => null,
+      };
 
   bool get isAuthenticated =>
       status == AuthStatus.authenticated && idToken != null;
@@ -118,16 +139,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       state = state.copyWith(idToken: token, phoneNumber: phone);
 
       // 4. Validate session by fetching user profile
-      final profile = await _patientService.getMyProfile(token);
-      if (profile != null) {
-        await LocalCacheService.saveProfile(profile);
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          patientProfile: profile,
-        );
-      } else {
-        state = state.copyWith(status: AuthStatus.needsRegistration);
-      }
+      await _applyProfile(await _patientService.getMyProfile(token));
     } on ApiException catch (e) {
       if (e.statusCode == 401 || e.statusCode == 403) {
         await _secureStorage.clearAll();
@@ -146,7 +158,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     final cached = LocalCacheService.getProfile();
     if (token != null && cached != null) {
       state = AuthState(
-        status: AuthStatus.authenticated,
+        status: statusForProfile(cached),
         idToken: token,
         phoneNumber: phone,
         patientProfile: cached,
@@ -245,28 +257,61 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
       state = state.copyWith(idToken: token);
 
-      // Call GET /api/patients/me
-      final profile = await _patientService.getMyProfile(token);
-
-      if (profile != null) {
-        // Patient profile exists -> go to Dashboard
-        await LocalCacheService.saveProfile(profile);
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          patientProfile: profile,
-        );
-      } else {
-        // 404 Not Found -> Patient needs registration
-        state = state.copyWith(
-          status: AuthStatus.needsRegistration,
-        );
-      }
+      await _applyProfile(await _patientService.getMyProfile(token));
     } catch (e) {
       state = state.copyWith(
         status: AuthStatus.error,
         errorMessage: e.toString().replaceAll('Exception: ', ''),
       );
     }
+  }
+
+  /// Routes a GET /patients/me result. Only real profiles are cached.
+  Future<void> _applyProfile(Map<String, dynamic>? profile) async {
+    final status = statusForProfile(profile);
+    if (profile == null || profile.containsKey('next')) {
+      // No profile: drop any old one (e.g. a rejected application's).
+      state = AuthState(status: status, idToken: state.idToken, phoneNumber: state.phoneNumber);
+      return;
+    }
+    await LocalCacheService.saveProfile(profile);
+    state = state.copyWith(status: status, patientProfile: profile);
+  }
+
+  /// Staff sign-in: email/password (sign-up when [create]) or Google.
+  Future<void> signInWithEmail(String email, String password, {bool create = false}) => _signIn(
+      () => create
+          ? _authService.signUpWithEmail(email.trim(), password)
+          : _authService.signInWithEmail(email.trim(), password));
+
+  Future<void> signInWithGoogle() => _signIn(_authService.signInWithGoogle);
+
+  Future<void> _signIn(Future<Object?> Function() signIn) async {
+    state = state.copyWith(status: AuthStatus.verifying);
+    try {
+      await signIn();
+      await _onAuthSuccess();
+    } on FirebaseAuthException catch (e) {
+      state = state.copyWith(
+        status: AuthStatus.error,
+        errorMessage: e.message ?? 'Sign-in failed (${e.code}).',
+      );
+    }
+  }
+
+  Future<void> sendPasswordReset(String email) => _authService.sendPasswordReset(email.trim());
+
+  Future<void> resendEmailVerification() => _authService.sendEmailVerification();
+
+  /// Re-reads the Firebase user and the backend profile: after clicking the
+  /// verification link, or to see whether an application was approved.
+  Future<void> recheck() async {
+    try {
+      await _authService.reloadUser();
+    } catch (_) {
+      // Offline: _onAuthSuccess reports it.
+    }
+    await _onAuthSuccess();
   }
 
   /// Complete patient registration via POST /api/patients
@@ -384,21 +429,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         phoneNumber: 'guest',
       );
 
-      // Try to fetch profile, if none exists, redirect to registration
-      final profile = await _patientService.getMyProfile(token);
-
-      if (profile != null) {
-        await LocalCacheService.saveProfile(profile);
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          patientProfile: profile,
-        );
-      } else {
-        // Guest needs to create profile
-        state = state.copyWith(
-          status: AuthStatus.needsRegistration,
-        );
-      }
+      await _applyProfile(await _patientService.getMyProfile(token));
     } catch (e) {
       state = state.copyWith(
         status: AuthStatus.error,

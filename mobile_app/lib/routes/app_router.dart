@@ -1,7 +1,9 @@
 import 'package:go_router/go_router.dart';
+import '../presentation/screens/auth/email_verification_screen.dart';
 import '../presentation/screens/auth/login_screen.dart';
 import '../presentation/screens/auth/otp_verification_screen.dart';
 import '../presentation/screens/auth/patient_registration_screen.dart';
+import '../presentation/screens/auth/staff_application_screen.dart';
 import '../presentation/screens/clinic/clinic_shell.dart';
 import '../presentation/screens/dashboard/dashboard_screen.dart';
 import '../presentation/screens/records/records_screen.dart';
@@ -29,6 +31,17 @@ final GoRouter appRouter = GoRouter(
       path: '/register',
       name: 'register',
       builder: (context, state) => const PatientRegistrationScreen(),
+    ),
+    // Staff sign-in steps (outside the shell: no profile yet).
+    GoRoute(
+      path: '/verify-email',
+      name: 'verify-email',
+      builder: (context, state) => const EmailVerificationScreen(),
+    ),
+    GoRoute(
+      path: '/staff-apply',
+      name: 'staff-apply',
+      builder: (context, state) => const StaffApplicationScreen(),
     ),
     // Every signed-in page. ClinicShell handles the auth wait, role gating
     // and the staff side navigation on wide screens.
@@ -73,7 +86,7 @@ final GoRouter appRouter = GoRouter(
           name: 'profile',
           builder: (context, state) => const ProfileScreen(),
         ),
-        // Doctor Routes (DOCTOR + ADMIN)
+        // Clinic routes: gated by permission in ClinicShell
         GoRoute(
           path: '/doctor/today-appointments',
           name: 'doctor-today-appointments',
@@ -92,11 +105,10 @@ final GoRouter appRouter = GoRouter(
           name: 'doctor-patients',
           builder: (context, state) => const DoctorPatientLookupScreen(),
         ),
-        // Admin Routes (ADMIN only)
         GoRoute(
-          path: '/admin/doctors',
-          name: 'admin-doctors',
-          builder: (context, state) => const AdminManageDoctorsScreen(),
+          path: '/admin/staff',
+          name: 'admin-staff',
+          builder: (context, state) => const AdminStaffScreen(),
         ),
         GoRoute(
           path: '/admin/clinics',
