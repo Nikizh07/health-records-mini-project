@@ -21,6 +21,7 @@ class SecureStorageService {
 
   static const String _tokenKey = AppConstants.authTokenKey;
   static const String _phoneKey = 'user_phone_number';
+  static const String _patientIntentKey = 'signed_in_as_patient';
 
   /// Securely write the Firebase JWT ID Token
   Future<void> saveToken(String token) async {
@@ -46,6 +47,14 @@ class SecureStorageService {
   Future<String?> getPhoneNumber() async {
     return await _storage.read(key: _phoneKey);
   }
+
+  /// Whether the user chose the patient side for a Google / email sign-in, so a
+  /// restart still asks them to link a phone rather than apply as staff.
+  Future<void> savePatientIntent(bool asPatient) async {
+    await _storage.write(key: _patientIntentKey, value: asPatient ? '1' : null);
+  }
+
+  Future<bool> getPatientIntent() async => await _storage.read(key: _patientIntentKey) == '1';
 
   /// Clear all securely stored credentials
   Future<void> clearAll() async {

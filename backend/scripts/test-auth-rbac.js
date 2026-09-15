@@ -9,6 +9,7 @@
 // Phase 2: roles + permission table — a role × endpoint matrix generated from
 // config/permissions.js, account status, clinic scope.
 // Phase 3: staff onboarding — invites, doctor applications, approve/reject/disable.
+// Phase 5: desk registration (no account) and the patient's claim by date of birth.
 //
 // Same harness as scripts/test-interactions.js: Firebase is stubbed in
 // require.cache before the app loads and the real Express app is driven over
@@ -292,6 +293,7 @@ async function main() {
     'self:profile': ['GET', '/appointments/me'],
     'patient:lookup': ['GET', '/patients/search?q=a'],
     'appointment:manage': ['GET', '/appointments?status=bogus'],
+    'patient:register': ['POST', '/patients/register', {}],
     'record:read': ['GET', '/protected/doctor-only'],
     'record:write': ['POST', '/records', {}],
     'interaction:check': ['POST', '/records/interaction-check', {}],
@@ -301,7 +303,7 @@ async function main() {
     'clinic:create': ['POST', '/clinics', {}],
   };
   // Permissions whose endpoints arrive in a later phase.
-  const LATER = ['consent:respond', 'patient:register', 'consent:request', 'consent:emergency', 'audit:read'];
+  const LATER = ['consent:respond', 'consent:request', 'consent:emergency', 'audit:read'];
 
   section('Phase 2 · every permission in the table is tested');
   const allPerms = [...new Set(Object.values(PERMISSIONS).flat())];
@@ -542,6 +544,63 @@ async function main() {
   r = await api('POST', `/staff/${deskUser.id}/approve`, { token: AS.CLINIC_ADMIN });
   ok('approve re-enables a disabled account', r.status === 200 && r.body?.data?.status === 'ACTIVE', detail(r));
 
+  // ═══════════════════════════════════════════════════════════
+  // Phase 5: desk registration and claim
+  // ═══════════════════════════════════════════════════════════
+  const DESK_PHONE = `+9189${N}`;
+  const LOCK_PHONE = `+9188${N}`;
+  const recepUser = await prisma.user.findUnique({ where: { firebase_uid: `${TAG}-p2recep` } });
+
+  section('Phase 5 · desk registration');
+  r = await api('POST', '/patients/register', { token: AS.RECEPTIONIST, body: { ...PATIENT_FORM, dob: '1988-04-12' } });
+  ok('a phone is required', r.status === 400, detail(r));
+  r = await api('POST', '/patients/register', { token: AS.RECEPTIONIST, body: { ...PATIENT_FORM, dob: '1988-04-12', phone: DESK_PHONE.slice(3) } });
+  const deskPatient = r.body?.data;
+  ok('a receptionist registers a walk-in with no account (10-digit phone → E.164)',
+    r.status === 201 && deskPatient?.user_id === null && deskPatient?.phone === DESK_PHONE && /^MWH-/.test(deskPatient?.health_id || ''), detail(r));
+  ok('…recording who registered them', deskPatient?.registered_by_user_id === recepUser.id);
+  r = await api('POST', '/patients/register', { token: AS.DOCTOR, body: { ...PATIENT_FORM, phone: DESK_PHONE } });
+  ok('the same phone again → 409 with the existing health ID', r.status === 409 && r.body?.data?.health_id === deskPatient?.health_id, detail(r));
+
+  section('Phase 5 · patients sign in without a phone');
+  const GOOGLE_PATIENT = token({ uid: 'p5google', provider: 'google.com', email: mail('google'), emailVerified: true });
+  r = await api('POST', '/patients', { token: GOOGLE_PATIENT, body: PATIENT_FORM });
+  ok('a Google account without a linked phone cannot register as a patient', r.status === 400, detail(r));
+  r = await api('POST', '/patients/claim', { token: GOOGLE_PATIENT, body: { dob: '1988-04-12' } });
+  ok('…nor claim a profile', r.status === 404, detail(r));
+  r = await api('POST', '/patients', { token: AS.DOCTOR, body: PATIENT_FORM });
+  ok('a staff account cannot give itself a patient profile', r.status === 403, detail(r));
+
+  section('Phase 5 · claim by date of birth');
+  // A Google sign-in that linked the desk phone looks like this to the backend.
+  const CLAIMER = token({ uid: 'p5claimer', phone: DESK_PHONE, provider: 'google.com', email: mail('claimer'), emailVerified: true });
+  r = await api('GET', '/patients/me', { token: CLAIMER });
+  ok('signing in on the desk phone → next CLAIM', r.status === 404 && r.body?.next === 'CLAIM', detail(r));
+  r = await api('POST', '/patients/claim', { token: CLAIMER, body: { dob: '1988-4-12' } });
+  ok('the date must be YYYY-MM-DD', r.status === 400, detail(r));
+  r = await api('POST', '/patients/claim', { token: CLAIMER, body: { dob: '1988-12-04' } });
+  ok('a wrong date of birth → 403 with attempts left', r.status === 403 && r.body?.attempts_left === 4, detail(r));
+  ok('…and links nothing', (await prisma.patient.findUnique({ where: { id: deskPatient.id } })).user_id === null);
+  r = await api('POST', '/patients/claim', { token: CLAIMER, body: { dob: '1988-04-12' } });
+  ok('the right date of birth links the profile', r.status === 200 && r.body?.data?.id === deskPatient.id && r.body?.data?.permissions?.includes('self:profile'), detail(r));
+  r = await api('GET', '/patients/me', { token: CLAIMER });
+  ok('…/me now returns it', r.status === 200 && r.body?.data?.health_id === deskPatient.health_id, detail(r));
+  r = await api('POST', '/patients/claim', { token: CLAIMER, body: { dob: '1988-04-12' } });
+  ok('claiming twice → 409', r.status === 409, detail(r));
+
+  r = await api('POST', '/patients/register', { token: AS.CLINIC_ADMIN, body: { ...PATIENT_FORM, dob: '1975-06-30', phone: LOCK_PHONE } });
+  ok('a clinic admin can register at the desk too', r.status === 201, detail(r));
+  const GUESSER = token({ uid: 'p5guesser', phone: LOCK_PHONE });
+  const guesses = [];
+  for (let i = 0; i < 5; i++) guesses.push(await api('POST', '/patients/claim', { token: GUESSER, body: { dob: `1975-01-0${i + 1}` } }));
+  ok('4 wrong dates → 403, the 5th → 423 locked',
+    guesses.slice(0, 4).every((g) => g.status === 403) && guesses[4].status === 423, guesses.map((g) => g.status).join());
+  r = await api('POST', '/patients/claim', { token: GUESSER, body: { dob: '1975-06-30' } });
+  ok('…and while locked even the right date is refused', r.status === 423, detail(r));
+  const parallel = await Promise.all(Array.from({ length: 8 }, (_, i) =>
+    api('POST', '/patients/claim', { token: GUESSER, body: { dob: `1975-02-0${i + 1}` } })));
+  ok('…parallel guesses do not get past the lock', parallel.every((g) => g.status === 423), parallel.map((g) => g.status).join());
+
   // ───────────────────────────────────────────────────────────
   section('A database failure is a 500, not a logout');
   const findUnique = prisma.user.findUnique;
@@ -556,7 +615,7 @@ async function main() {
   const users = await prisma.user.findMany({ where: { firebase_uid: { startsWith: TAG } }, select: { id: true } });
   const userIds = users.map((u) => u.id);
   const patients = await prisma.patient.findMany({
-    where: { OR: [{ id: { in: [patient.id, patient2.id] } }, { user_id: { in: userIds } }] },
+    where: { OR: [{ id: { in: [patient.id, patient2.id] } }, { user_id: { in: userIds } }, { phone: { in: [DESK_PHONE, LOCK_PHONE] } }] },
     select: { id: true },
   });
   const patientIds = patients.map((p) => p.id);

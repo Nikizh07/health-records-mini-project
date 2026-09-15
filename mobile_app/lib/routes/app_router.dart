@@ -1,4 +1,5 @@
 import 'package:go_router/go_router.dart';
+import '../presentation/screens/auth/claim_profile_screen.dart';
 import '../presentation/screens/auth/email_verification_screen.dart';
 import '../presentation/screens/auth/login_screen.dart';
 import '../presentation/screens/auth/otp_verification_screen.dart';
@@ -32,7 +33,17 @@ final GoRouter appRouter = GoRouter(
       name: 'register',
       builder: (context, state) => const PatientRegistrationScreen(),
     ),
-    // Staff sign-in steps (outside the shell: no profile yet).
+    // Sign-in steps before a profile exists (outside the shell).
+    GoRoute(
+      path: '/link-phone',
+      name: 'link-phone',
+      builder: (context, state) => const LoginScreen(linkPhone: true),
+    ),
+    GoRoute(
+      path: '/claim',
+      name: 'claim',
+      builder: (context, state) => const ClaimProfileScreen(),
+    ),
     GoRoute(
       path: '/verify-email',
       name: 'verify-email',

@@ -10,7 +10,7 @@ class PatientService {
 
   /// Calls GET /api/patients/me with the Firebase ID token in Authorization header.
   /// Returns the profile map if found. On 404 (no profile yet) returns only
-  /// `{'next': 'REGISTER' | 'VERIFY_EMAIL' | 'STAFF_APPLY'}` from the backend.
+  /// `{'next': 'REGISTER' | 'CLAIM' | 'VERIFY_EMAIL' | 'STAFF_APPLY'}` from the backend.
   Future<Map<String, dynamic>?> getMyProfile(String idToken) async {
     try {
       final response = await _dio.get(
@@ -65,6 +65,21 @@ class PatientService {
         return response.data['data'] as Map<String, dynamic>;
       }
       throw ApiException(response.data['message']?.toString() ?? 'Failed to register patient');
+    } on DioException catch (e) {
+      throw ApiException.fromDioException(e);
+    }
+  }
+
+  /// POST /api/patients/claim: links a clinic-registered profile to this phone
+  /// sign-in when [dob] (YYYY-MM-DD) matches. Returns the profile.
+  Future<Map<String, dynamic>> claimPatient({required String idToken, required String dob}) async {
+    try {
+      final response = await _dio.post(
+        '/patients/claim',
+        data: {'dob': dob},
+        options: Options(headers: {'Authorization': 'Bearer $idToken'}),
+      );
+      return response.data['data'] as Map<String, dynamic>;
     } on DioException catch (e) {
       throw ApiException.fromDioException(e);
     }

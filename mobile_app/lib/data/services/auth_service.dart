@@ -26,15 +26,20 @@ class AuthService {
   ///
   /// On Web: Uses [signInWithPhoneNumber] with standard SMS OTP flow.
   /// On Mobile: Uses [verifyPhoneNumber].
+  /// With [link], the phone is added to the signed-in (Google / email) user
+  /// instead of signing in: patients need a verified phone.
   Future<void> sendOtp({
     required String phoneNumber,
+    bool link = false,
     required Function(String verificationId) onCodeSent,
     required Function(FirebaseAuthException error) onVerificationFailed,
     required Function(PhoneAuthCredential credential) onAutoVerify,
   }) async {
     if (kIsWeb) {
       try {
-        _webConfirmationResult = await _auth.signInWithPhoneNumber(phoneNumber);
+        _webConfirmationResult = link
+            ? await _auth.currentUser!.linkWithPhoneNumber(phoneNumber)
+            : await _auth.signInWithPhoneNumber(phoneNumber);
         onCodeSent(_webConfirmationResult?.verificationId ?? 'web_verification');
       } on FirebaseAuthException catch (e) {
         onVerificationFailed(e);
@@ -52,7 +57,9 @@ class AuthService {
         phoneNumber: phoneNumber,
         timeout: const Duration(seconds: 60),
         verificationCompleted: (PhoneAuthCredential credential) async {
-          await _auth.signInWithCredential(credential);
+          link
+              ? await _auth.currentUser!.linkWithCredential(credential)
+              : await _auth.signInWithCredential(credential);
           onAutoVerify(credential);
         },
         verificationFailed: onVerificationFailed,
@@ -73,6 +80,7 @@ class AuthService {
   Future<UserCredential> verifyOtp({
     required String smsCode,
     String? verificationId,
+    bool link = false,
   }) async {
     if (kIsWeb) {
       if (_webConfirmationResult == null) {
@@ -94,7 +102,9 @@ class AuthService {
         verificationId: id,
         smsCode: smsCode,
       );
-      return await _auth.signInWithCredential(credential);
+      return link
+          ? await _auth.currentUser!.linkWithCredential(credential)
+          : await _auth.signInWithCredential(credential);
     }
   }
 
@@ -111,19 +121,15 @@ class AuthService {
     return await _auth.signInAnonymously();
   }
 
-  // Staff sign-in (email/password and Google). Both providers must be enabled
-  // in the Firebase console; Google on Android also needs the app's SHA-1.
+  // Email/password and Google sign-in (staff, and patients who then link a
+  // phone). Both providers are enabled in the Firebase console; Google on
+  // Android also needs the app's SHA-1.
 
   Future<UserCredential> signInWithEmail(String email, String password) =>
       _auth.signInWithEmailAndPassword(email: email, password: password);
 
-  /// Creates the account and sends the verification email: the backend only
-  /// accepts an invite or an application from a verified email.
-  Future<UserCredential> signUpWithEmail(String email, String password) async {
-    final credential = await _auth.createUserWithEmailAndPassword(email: email, password: password);
-    await credential.user?.sendEmailVerification();
-    return credential;
-  }
+  Future<UserCredential> signUpWithEmail(String email, String password) =>
+      _auth.createUserWithEmailAndPassword(email: email, password: password);
 
   Future<void> sendEmailVerification() async => _auth.currentUser?.sendEmailVerification();
 

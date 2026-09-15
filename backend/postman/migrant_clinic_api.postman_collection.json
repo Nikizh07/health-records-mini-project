@@ -713,6 +713,96 @@
               "path": ["api", "patients", "{{patient_id}}"]
             }
           }
+        },
+        {
+          "name": "5. Register Patient at the Desk (patient:register)",
+          "description": "Auth Phase 5. Staff (receptionist, doctor, clinic admin) register a walk-in with no account: user_id is null. A duplicate phone returns 409 with the existing patient in data. The patient later signs in with OTP on this phone, gets next: CLAIM from /patients/me, and links the profile with request 6.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"201 Created (or 409 if this phone is already registered)\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([201, 409]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{doctor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ravi Kumar\",\n  \"dob\": \"1988-04-12\",\n  \"gender\": \"Male\",\n  \"language_pref\": \"Tamil\",\n  \"phone\": \"9876501234\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/patients/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "patients", "register"]
+            }
+          }
+        },
+        {
+          "name": "6. Claim Desk-Registered Profile (by date of birth)",
+          "description": "Auth Phase 5. Signed in with phone OTP on the number the clinic registered (no patient profile yet). A wrong date gives 403 with attempts_left; 5 wrong dates lock the claim for 24 hours (423). Success returns the profile like GET /patients/me.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"200 OK: profile linked\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dob\": \"1988-04-12\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/patients/claim",
+              "host": ["{{base_url}}"],
+              "path": ["api", "patients", "claim"]
+            }
+          }
         }
       ]
     },

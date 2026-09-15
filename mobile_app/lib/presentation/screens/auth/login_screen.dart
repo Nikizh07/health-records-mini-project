@@ -7,7 +7,11 @@ import '../../../core/theme/app_colors.dart';
 import '../../../providers/auth_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  /// A patient signed in with Google / email: only the phone step, and the
+  /// verified phone is linked to that account (route /link-phone).
+  final bool linkPhone;
+
+  const LoginScreen({super.key, this.linkPhone = false});
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -23,6 +27,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// Staff mostly use the web portal; patients mostly use the phone app.
   bool _staff = kIsWeb;
 
+  /// Patient side: email + password instead of the mobile number.
+  bool _patientEmail = false;
+
   static final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
   @override
@@ -37,7 +44,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (_formKey.currentState?.validate() ?? false) {
       ref
           .read(authNotifierProvider.notifier)
-          .signInWithEmail(_emailController.text, _passwordController.text, create: create);
+          .signInWithEmail(_emailController.text, _passwordController.text, create: create, asPatient: !_staff);
     }
   }
 
@@ -59,7 +66,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void _handleSendOtp() {
     if (_formKey.currentState?.validate() ?? false) {
       final fullPhoneNumber = '$_selectedCountryCode${_phoneController.text.trim()}';
-      ref.read(authNotifierProvider.notifier).sendOtp(fullPhoneNumber);
+      ref.read(authNotifierProvider.notifier).sendOtp(fullPhoneNumber, link: widget.linkPhone);
     }
   }
 
@@ -74,7 +81,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // snackbar appears twice.
       if (ModalRoute.of(context)?.isCurrent != true) return;
 
-      if (next.route != null) {
+      if (next.route != null && !(widget.linkPhone && next.route == '/link-phone')) {
         context.go(next.route!);
       } else if (next.status == AuthStatus.otpSent) {
         context.push('/verify-otp');
@@ -147,96 +154,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       style: TextStyle(fontSize: 14, color: AppColors.textMuted, height: 1.4),
                     ),
                     const SizedBox(height: 24),
-                    SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(value: false, label: Text('Patient'), icon: Icon(Icons.person_outline)),
-                        ButtonSegment(value: true, label: Text('Clinic staff'), icon: Icon(Icons.badge_outlined)),
-                      ],
-                      selected: {_staff},
-                      onSelectionChanged: (s) => setState(() => _staff = s.first),
-                    ),
-                    const SizedBox(height: 16),
-
-                    if (_staff)
-                      _staffCard(authState, muted)
-                    else
-                    // Phone sign-in
-                    Card(
-                      margin: EdgeInsets.zero,
-                      child: Padding(
-                        padding: const EdgeInsets.all(20.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const Text(
-                              'Sign in with your mobile number',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                            ),
-                            const SizedBox(height: 4),
-                            const Text("We'll send a 6-digit verification code by SMS.", style: muted),
-                            const SizedBox(height: 20),
-                            TextFormField(
-                              controller: _phoneController,
-                              keyboardType: TextInputType.phone,
-                              textInputAction: TextInputAction.done,
-                              autofillHints: const [AutofillHints.telephoneNumberNational],
-                              onFieldSubmitted: (_) => _handleSendOtp(),
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                                LengthLimitingTextInputFormatter(10),
-                              ],
-                              decoration: InputDecoration(
-                                labelText: 'Mobile number',
-                                hintText: '9876543210',
-                                prefixIcon: Padding(
-                                  padding: const EdgeInsets.only(left: 16, right: 10),
-                                  child: Text(
-                                    _selectedCountryCode,
-                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                                  ),
-                                ),
-                                prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
-                              ),
-                              validator: (value) {
-                                final digits = value?.trim() ?? '';
-                                if (digits.isEmpty) {
-                                  return 'Phone number is required';
-                                }
-                                if (digits.length != 10) {
-                                  return 'Enter a valid 10-digit mobile number';
-                                }
-                                if (!RegExp(r'^[6-9]\d{9}$').hasMatch(digits)) {
-                                  return 'Must start with 6, 7, 8 or 9 (valid Indian mobile)';
-                                }
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 20),
-                            FilledButton(
-                              onPressed: authState.isLoading ? null : _handleSendOtp,
-                              child: authState.isLoading
-                                  ? const SizedBox(
-                                      height: 22,
-                                      width: 22,
-                                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                                    )
-                                  : const Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Text('Send code'),
-                                        SizedBox(width: 8),
-                                        Icon(Icons.arrow_forward_rounded, size: 18),
-                                      ],
-                                    ),
-                            ),
-                          ],
-                        ),
+                    if (widget.linkPhone) ...[
+                      _phoneCard(authState, muted),
+                      const SizedBox(height: 12),
+                      TextButton(
+                        onPressed: () async {
+                          await ref.read(authNotifierProvider.notifier).signOut();
+                          if (context.mounted) context.go('/login');
+                        },
+                        child: const Text('Sign out'),
                       ),
-                    ),
-                    // Guest login is for local testing only: hidden in release
-                    // builds (debug + the profile `web-doctor` build keep it),
-                    // and the backend refuses anonymous tokens in production.
-                    if (!kReleaseMode && !_staff) ...[
+                    ] else ...[
+                      SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment(value: false, label: Text('Patient'), icon: Icon(Icons.person_outline)),
+                          ButtonSegment(value: true, label: Text('Clinic staff'), icon: Icon(Icons.badge_outlined)),
+                        ],
+                        selected: {_staff},
+                        onSelectionChanged: (s) => setState(() => _staff = s.first),
+                      ),
+                      const SizedBox(height: 16),
+                      if (_staff || _patientEmail) _emailCard(authState, muted) else _phoneCard(authState, muted),
                       const SizedBox(height: 20),
                       const Row(
                         children: [
@@ -252,16 +190,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       OutlinedButton.icon(
                         onPressed: authState.isLoading
                             ? null
-                            : () => ref.read(authNotifierProvider.notifier).signInAsGuest(),
-                        icon: const Icon(Icons.person_outline),
-                        label: const Text('Continue as guest'),
+                            : () => ref.read(authNotifierProvider.notifier).signInWithGoogle(asPatient: !_staff),
+                        icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
+                        label: const Text('Continue with Google'),
                       ),
-                      const SizedBox(height: 10),
-                      const Text(
-                        'Test build: use guest mode if SMS verification is not configured.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12, color: AppColors.textMuted),
-                      ),
+                      if (!_staff)
+                        TextButton(
+                          onPressed: () => setState(() => _patientEmail = !_patientEmail),
+                          child: Text(_patientEmail ? 'Use mobile number instead' : 'Use email and password'),
+                        ),
+                      // Guest login is for local testing only: hidden in release
+                      // builds (debug + the profile `web-doctor` build keep it),
+                      // and the backend refuses anonymous tokens in production.
+                      if (!kReleaseMode && !_staff) ...[
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: authState.isLoading
+                              ? null
+                              : () => ref.read(authNotifierProvider.notifier).signInAsGuest(),
+                          icon: const Icon(Icons.person_outline),
+                          label: const Text('Continue as guest'),
+                        ),
+                        const SizedBox(height: 10),
+                        const Text(
+                          'Test build: use guest mode if SMS verification is not configured.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                        ),
+                      ],
                     ],
                     const SizedBox(height: 32),
 
@@ -286,7 +242,87 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  Widget _staffCard(AuthState authState, TextStyle muted) {
+  Widget _phoneCard(AuthState authState, TextStyle muted) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              widget.linkPhone ? 'Add your mobile number' : 'Sign in with your mobile number',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              widget.linkPhone
+                  ? "Patient accounts need a verified mobile number. We'll send a 6-digit code by SMS."
+                  : "We'll send a 6-digit verification code by SMS.",
+              style: muted,
+            ),
+            const SizedBox(height: 20),
+            TextFormField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              textInputAction: TextInputAction.done,
+              autofillHints: const [AutofillHints.telephoneNumberNational],
+              onFieldSubmitted: (_) => _handleSendOtp(),
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(10),
+              ],
+              decoration: InputDecoration(
+                labelText: 'Mobile number',
+                hintText: '9876543210',
+                prefixIcon: Padding(
+                  padding: const EdgeInsets.only(left: 16, right: 10),
+                  child: Text(
+                    _selectedCountryCode,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+              ),
+              validator: (value) {
+                final digits = value?.trim() ?? '';
+                if (digits.isEmpty) {
+                  return 'Phone number is required';
+                }
+                if (digits.length != 10) {
+                  return 'Enter a valid 10-digit mobile number';
+                }
+                if (!RegExp(r'^[6-9]\d{9}$').hasMatch(digits)) {
+                  return 'Must start with 6, 7, 8 or 9 (valid Indian mobile)';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 20),
+            FilledButton(
+              onPressed: authState.isLoading ? null : _handleSendOtp,
+              child: authState.isLoading
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                    )
+                  : const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('Send code'),
+                        SizedBox(width: 8),
+                        Icon(Icons.arrow_forward_rounded, size: 18),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _emailCard(AuthState authState, TextStyle muted) {
     final busy = authState.isLoading;
     return Card(
       margin: EdgeInsets.zero,
@@ -296,9 +332,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Clinic staff sign-in', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              Text(_staff ? 'Clinic staff sign-in' : 'Sign in with email',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
               const SizedBox(height: 4),
-              Text('Doctors, receptionists and clinic administrators.', style: muted),
+              Text(
+                _staff ? 'Doctors, receptionists and clinic administrators.' : "You'll add your mobile number next.",
+                style: muted,
+              ),
               const SizedBox(height: 20),
               TextFormField(
                 controller: _emailController,
@@ -337,20 +377,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               OutlinedButton(
                 onPressed: busy ? null : () => _handleEmail(create: true),
                 child: const Text('Create account'),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  const Expanded(child: Divider()),
-                  Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Text('or', style: muted)),
-                  const Expanded(child: Divider()),
-                ],
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: busy ? null : () => ref.read(authNotifierProvider.notifier).signInWithGoogle(),
-                icon: const Icon(Icons.g_mobiledata_rounded, size: 28),
-                label: const Text('Continue with Google'),
               ),
             ],
           ),

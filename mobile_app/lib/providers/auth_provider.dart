@@ -14,6 +14,8 @@ enum AuthStatus {
   verifying,
   authenticated,
   needsRegistration,
+  needsPhoneLink, // patient signed in with Google / email: add a verified phone
+  needsClaim, // a clinic registered this phone: confirm date of birth
   needsEmailVerification, // email sign-up, link not clicked yet
   needsStaffApplication, // verified email, no invite: apply as a doctor
   pendingApproval, // applied, waiting for a clinic admin
@@ -21,7 +23,10 @@ enum AuthStatus {
 }
 
 /// Status for a GET /patients/me result: a profile, or `{'next': ...}` on 404.
-AuthStatus statusForProfile(Map<String, dynamic>? profile) => switch (profile) {
+/// [needsPhone]: a patient-side sign-in whose Firebase user has no phone yet.
+AuthStatus statusForProfile(Map<String, dynamic>? profile, {bool needsPhone = false}) => switch (profile) {
+      {'next': _} when needsPhone => AuthStatus.needsPhoneLink,
+      {'next': 'CLAIM'} => AuthStatus.needsClaim,
       {'next': 'VERIFY_EMAIL'} => AuthStatus.needsEmailVerification,
       {'next': 'STAFF_APPLY'} => AuthStatus.needsStaffApplication,
       null || {'next': _} => AuthStatus.needsRegistration,
@@ -53,6 +58,8 @@ class AuthState {
   String? get route => switch (status) {
         AuthStatus.authenticated => '/',
         AuthStatus.needsRegistration => '/register',
+        AuthStatus.needsPhoneLink => '/link-phone',
+        AuthStatus.needsClaim => '/claim',
         AuthStatus.needsEmailVerification => '/verify-email',
         AuthStatus.needsStaffApplication || AuthStatus.pendingApproval => '/staff-apply',
         _ => null,
@@ -97,6 +104,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
   final PatientService _patientService;
   final SecureStorageService _secureStorage;
 
+  /// Chose the patient side for a Google / email sign-in (kept in storage).
+  bool _asPatient = false;
+
+  /// The OTP being sent / verified adds a phone to the signed-in user.
+  bool _linking = false;
+
   AuthNotifier(this._authService, this._patientService, this._secureStorage)
       : super(const AuthState(status: AuthStatus.restoring)) {
     restoreSession();
@@ -125,6 +138,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       // 2. Fall back to encrypted secure storage
       token ??= await _secureStorage.getToken();
       phone ??= await _secureStorage.getPhoneNumber();
+      _asPatient = await _secureStorage.getPatientIntent();
 
       if (token == null || token.isEmpty) {
         state = const AuthState();
@@ -168,8 +182,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  /// Step 3: Trigger OTP dispatch via Firebase
-  Future<void> sendOtp(String rawPhone) async {
+  /// Step 3: Trigger OTP dispatch via Firebase. [link] adds the phone to the
+  /// signed-in Google / email user; a resend keeps the previous mode.
+  Future<void> sendOtp(String rawPhone, {bool? link}) async {
+    _linking = link ?? _linking;
     // Standardize to E.164 format (+91 for India if not specified)
     String formattedPhone = rawPhone.trim();
     if (!formattedPhone.startsWith('+')) {
@@ -185,6 +201,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       await _authService.sendOtp(
         phoneNumber: formattedPhone,
+        link: _linking,
         onCodeSent: (verificationId) {
           state = state.copyWith(
             status: AuthStatus.otpSent,
@@ -221,13 +238,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await _authService.verifyOtp(
         smsCode: smsCode.trim(),
         verificationId: state.verificationId,
+        link: _linking,
       );
 
       await _onAuthSuccess();
     } on FirebaseAuthException catch (e) {
       state = state.copyWith(
         status: AuthStatus.error,
-        errorMessage: e.message ?? 'Invalid OTP code.',
+        errorMessage: e.code == 'credential-already-in-use' || e.code == 'account-exists-with-different-credential'
+            ? 'This number already has an account. Sign out and sign in with the phone number instead.'
+            : e.message ?? 'Invalid OTP code.',
       );
     } catch (e) {
       state = state.copyWith(
@@ -268,7 +288,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   /// Routes a GET /patients/me result. Only real profiles are cached.
   Future<void> _applyProfile(Map<String, dynamic>? profile) async {
-    final status = statusForProfile(profile);
+    final phone = _authService.currentUser?.phoneNumber;
+    final status = statusForProfile(profile, needsPhone: _asPatient && (phone == null || phone.isEmpty));
     if (profile == null || profile.containsKey('next')) {
       // No profile: drop any old one (e.g. a rejected application's).
       state = AuthState(status: status, idToken: state.idToken, phoneNumber: state.phoneNumber);
@@ -278,17 +299,26 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(status: status, patientProfile: profile);
   }
 
-  /// Staff sign-in: email/password (sign-up when [create]) or Google.
-  Future<void> signInWithEmail(String email, String password, {bool create = false}) => _signIn(
-      () => create
-          ? _authService.signUpWithEmail(email.trim(), password)
-          : _authService.signInWithEmail(email.trim(), password));
+  /// Email/password (sign-up when [create]) or Google. Staff go on to invite /
+  /// application; patients ([asPatient]) go on to link a phone. Only staff need
+  /// a verified email, so only they get the verification email.
+  Future<void> signInWithEmail(String email, String password, {bool create = false, bool asPatient = false}) =>
+      _signIn(asPatient, () async {
+        if (!create) {
+          await _authService.signInWithEmail(email.trim(), password);
+        } else {
+          await _authService.signUpWithEmail(email.trim(), password);
+          if (!asPatient) await _authService.sendEmailVerification();
+        }
+      });
 
-  Future<void> signInWithGoogle() => _signIn(_authService.signInWithGoogle);
+  Future<void> signInWithGoogle({bool asPatient = false}) => _signIn(asPatient, _authService.signInWithGoogle);
 
-  Future<void> _signIn(Future<Object?> Function() signIn) async {
+  Future<void> _signIn(bool asPatient, Future<void> Function() signIn) async {
     state = state.copyWith(status: AuthStatus.verifying);
     try {
+      _asPatient = asPatient;
+      await _secureStorage.savePatientIntent(asPatient);
       await signIn();
       await _onAuthSuccess();
     } on FirebaseAuthException catch (e) {
@@ -312,6 +342,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
       // Offline: _onAuthSuccess reports it.
     }
     await _onAuthSuccess();
+  }
+
+  /// Link a clinic-registered profile by date of birth (YYYY-MM-DD).
+  Future<void> claimProfile(String dob) async {
+    state = state.copyWith(status: AuthStatus.verifying);
+    try {
+      await _applyProfile(await _patientService.claimPatient(idToken: state.idToken ?? '', dob: dob));
+    } catch (e) {
+      state = state.copyWith(status: AuthStatus.error, errorMessage: e.toString());
+    }
   }
 
   /// Complete patient registration via POST /api/patients
@@ -392,6 +432,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   /// Sign out and purge secure storage credentials
   Future<void> signOut() async {
+    _asPatient = false;
+    _linking = false;
     await _secureStorage.clearAll();
     await LocalCacheService.clearProfile();
     await _authService.signOut();

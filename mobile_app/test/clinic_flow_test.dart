@@ -34,6 +34,8 @@ class _Auth implements AuthService {
     return _Credential();
   }
   @override
+  Future<UserCredential> signInWithGoogle() async => _Credential();
+  @override
   Future<String?> getIdToken({bool forceRefresh = false}) async => 'test-token';
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
@@ -51,6 +53,10 @@ class _Storage implements SecureStorageService {
   @override
   Future<void> savePhoneNumber(String phoneNumber) async {}
   @override
+  Future<void> savePatientIntent(bool asPatient) async {}
+  @override
+  Future<bool> getPatientIntent() async => false;
+  @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
@@ -60,8 +66,16 @@ class _Patients extends PatientService {
   _Patients(this.profile) : super(dio: Dio());
   final Map<String, dynamic> profile;
 
+  String? claimedDob;
+
   @override
   Future<Map<String, dynamic>?> getMyProfile(String idToken) async => profile;
+
+  @override
+  Future<Map<String, dynamic>> claimPatient({required String idToken, required String dob}) async {
+    claimedDob = dob;
+    return {..._profile('PATIENT'), 'health_id': 'MWH-DESK01'};
+  }
 
   @override
   Future<List<Map<String, dynamic>>> searchPatients({
@@ -179,6 +193,8 @@ Map<String, dynamic> _profile(String role) => switch (role) {
       'PENDING_DOCTOR' => {'name': 'Iyer', 'status': 'PENDING', 'permissions': <String>[],
           'clinic': {'name': 'Central Clinic'}, 'user': {'role': 'DOCTOR'}},
       'UNVERIFIED' => {'next': 'VERIFY_EMAIL'},
+      'STAFF_APPLY' => {'next': 'STAFF_APPLY'},
+      'CLAIM' => {'next': 'CLAIM'},
       'ADMIN' => {'name': 'System Administrator', 'role': 'ADMIN', 'user': {'role': 'ADMIN'},
           'permissions': ['staff:manage', 'clinic:update', 'clinic:create', 'audit:read']},
       _ => {'id': 'p9', 'name': 'Pat', 'health_id': 'MWH-X', 'user': {'role': 'PATIENT'},
@@ -192,6 +208,7 @@ Future<void> _pumpApp(
   _Records? records,
   _Staff? staff,
   _Auth? auth,
+  _Patients? patients,
   String? token = 'test-token',
   Size size = const Size(1280, 800),
 }) async {
@@ -203,7 +220,7 @@ Future<void> _pumpApp(
     overrides: [
       authServiceProvider.overrideWithValue(auth ?? _Auth()),
       secureStorageServiceProvider.overrideWithValue(_Storage(token: token)),
-      patientServiceProvider.overrideWithValue(_Patients(_profile(role))),
+      patientServiceProvider.overrideWithValue(patients ?? _Patients(_profile(role))),
       recordServiceProvider.overrideWithValue(records ?? _Records()),
       adminServiceProvider.overrideWithValue(_Admin()),
       staffServiceProvider.overrideWithValue(staff ?? _Staff()),
@@ -512,6 +529,37 @@ void main() {
     expect(auth.signedInEmail, 'iyer@clinic.in');
     expect(find.text('Waiting for approval'), findsOneWidget);
     expect(find.textContaining('Central Clinic'), findsOneWidget);
+  });
+
+  testWidgets('patient tab: Google sign-in without a phone is asked to link one', (tester) async {
+    // The backend says STAFF_APPLY for any verified email with no profile; the
+    // patient side overrides that with the phone step.
+    await _pumpApp(tester, 'STAFF_APPLY', '/login', token: null);
+    expect(find.text('Use email and password'), findsOneWidget); // patient side only
+    await tester.tap(find.text('Continue with Google'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add your mobile number'), findsOneWidget);
+    expect(find.text('Clinic staff'), findsNothing);
+    expect(find.text('Waiting for approval'), findsNothing);
+  });
+
+  testWidgets('a clinic-registered phone claims its profile by date of birth', (tester) async {
+    final patients = _Patients(_profile('CLAIM'));
+    await _pumpApp(tester, 'CLAIM', '/', patients: patients, size: const Size(400, 800));
+    expect(find.text('Your clinic profile'), findsOneWidget);
+
+    await tester.tap(find.text('Link my profile'));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter the date as YYYY-MM-DD'), findsOneWidget);
+    expect(patients.claimedDob, isNull);
+
+    await tester.enterText(find.byType(TextFormField), '1988-04-12');
+    await tester.tap(find.text('Link my profile'));
+    await tester.pumpAndSettle();
+    expect(patients.claimedDob, '1988-04-12');
+    expect(find.text('Your clinic profile'), findsNothing);
+    expect(find.textContaining('MWH-DESK01'), findsWidgets); // on the dashboard
   });
 
   testWidgets('an unverified email is sent from any page to verification', (tester) async {

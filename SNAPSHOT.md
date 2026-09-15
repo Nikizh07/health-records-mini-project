@@ -8,7 +8,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-4 built
+├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-5 built
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
@@ -50,7 +50,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── staff.routes.js        # /staff: invites, doctor applications, list, approve/reject/disable
 │   │   └── record.routes.js       # records, POST /interaction-check, POST /:id/upload (multer)
 │   ├── controllers/
-│   │   ├── health.controller.js, patient.controller.js, doctor.controller.js
+│   │   ├── health.controller.js, patient.controller.js (+ desk registration, claim by DOB), doctor.controller.js
 │   │   ├── clinic.controller.js, appointment.controller.js
 │   │   ├── staff.controller.js    # buildInvite (shared with POST /doctors), acceptInvite (used by /patients/me),
 │   │   │                          # applications, staff list, approve/reject/disable
@@ -75,7 +75,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── schema.prisma          # + DrugInteraction, InteractionCheck, InteractionSeverity
 │   │   └── migrations/            # 20260810170839_init_schema, 20260910082706,
 │   │                              # 20260912122022_add_drug_interactions, 20260912122039_add_history_indexes,
-│   │                              # 20260915000000_add_roles_status, 20260915120000_add_staff_onboarding
+│   │                              # 20260915000000_add_roles_status, 20260915120000_add_staff_onboarding,
+│   │                              # 20260915180000_add_patient_registered_by
 │   ├── utils/
 │   │   ├── healthId.js            # MWH-XXXXXX health ID generator
 │   │   ├── phone.js               # toE164(): every stored/matched phone goes through it (+91 default)
@@ -112,7 +113,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   │   ├── theme/app_colors.dart, app_theme.dart
     │   │   └── utils/app_logger.dart
     │   ├── data/services/
-    │   │   ├── auth_service.dart      # phone OTP, guest, email/password, Google
+    │   │   ├── auth_service.dart      # phone OTP (sign-in or link to a Google/email user), guest, email/password, Google
     │   │   ├── secure_storage_service.dart, local_cache_service.dart
     │   │   ├── patient_service.dart, appointment_service.dart
     │   │   ├── record_service.dart   # records + checkDrugInteractions (pre-flight)
@@ -125,7 +126,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   ├── presentation/
     │   │   ├── screens/
     │   │   │   ├── auth/          # login (Patient / Clinic staff tabs), otp_verification, patient_registration,
-    │   │   │   │                  # email_verification, staff_application (apply form + awaiting approval)
+    │   │   │   │                  # email_verification, staff_application (apply form + awaiting approval),
+    │   │   │   │                  # claim_profile (DOB for a clinic-registered phone); /link-phone reuses login
     │   │   │   ├── dashboard/     # dashboard_screen (+ chatbot placeholder) + widgets/dashboard_header_card
     │   │   │   ├── appointments/  # appointments_screen, book_appointment_screen
     │   │   │   ├── records/       # records_screen, record_detail_screen (opens report URL)

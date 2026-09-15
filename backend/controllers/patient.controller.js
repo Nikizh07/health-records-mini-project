@@ -7,6 +7,7 @@
 
 'use strict';
 
+const { STATUS_CODES } = require('http');
 const prisma = require('../config/prisma');
 const { generateUniqueHealthId } = require('../utils/healthId');
 const { toE164 } = require('../utils/phone');
@@ -19,6 +20,31 @@ const STAFF_TITLES = {
   RECEPTIONIST: 'Receptionist',
 };
 
+/** The patient form shared by self and desk registration; returns an error message or null. */
+function formError(body = {}) {
+  const { name, dob, gender, language_pref } = body;
+  if (!name || typeof name !== 'string' || name.trim().length < 2) {
+    return 'Field "name" is required and must be at least 2 characters.';
+  }
+  if (!dob || isNaN(Date.parse(dob))) {
+    return 'Field "dob" (Date of Birth) is required and must be a valid date format (e.g. YYYY-MM-DD).';
+  }
+  if (!gender || !['Male', 'Female', 'Other'].includes(gender)) {
+    return 'Field "gender" is required and must be one of: Male, Female, Other.';
+  }
+  if (!language_pref || typeof language_pref !== 'string') {
+    return 'Field "language_pref" is required (e.g. Bengali, Hindi, English, Tamil, Malayalam).';
+  }
+  return null;
+}
+
+const profileOf = (patient, user) => ({
+  ...patient,
+  permissions: permissionsFor(user.role, user.status),
+  status: user.status,
+  clinic: null,
+});
+
 /**
  * @route   POST /api/patients
  * @desc    Register a new patient profile linked to Firebase Auth UID & phone number
@@ -27,38 +53,9 @@ const STAFF_TITLES = {
 async function createPatient(req, res, next) {
   try {
     const { name, dob, gender, language_pref } = req.body;
-
-    // 1. Field Validations
-    if (!name || typeof name !== 'string' || name.trim().length < 2) {
-      return res.status(400).json({
-        success: false,
-        error: 'Bad Request',
-        message: 'Field "name" is required and must be at least 2 characters.',
-      });
-    }
-
-    if (!dob || isNaN(Date.parse(dob))) {
-      return res.status(400).json({
-        success: false,
-        error: 'Bad Request',
-        message: 'Field "dob" (Date of Birth) is required and must be a valid date format (e.g. YYYY-MM-DD).',
-      });
-    }
-
-    if (!gender || !['Male', 'Female', 'Other'].includes(gender)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Bad Request',
-        message: 'Field "gender" is required and must be one of: Male, Female, Other.',
-      });
-    }
-
-    if (!language_pref || typeof language_pref !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: 'Bad Request',
-        message: 'Field "language_pref" is required (e.g. Bengali, Hindi, English, Tamil, Malayalam).',
-      });
+    const invalid = formError(req.body);
+    if (invalid) {
+      return res.status(400).json({ success: false, error: 'Bad Request', message: invalid });
     }
 
     // The phone comes ONLY from the verified Firebase token — never the body,
@@ -80,6 +77,15 @@ async function createPatient(req, res, next) {
     let user = await prisma.user.findUnique({
       where: { firebase_uid: req.user.uid },
     });
+
+    // Staff register other people through POST /patients/register.
+    if (user && user.role !== 'PATIENT') {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'Staff accounts cannot have a patient profile.',
+      });
+    }
 
     if (!user) {
       user = await prisma.user.create({
@@ -133,7 +139,7 @@ async function createPatient(req, res, next) {
       success: true,
       message: '🎉 Patient profile registered successfully!',
       // Same access fields as GET /patients/me: the app keeps this as the profile.
-      data: { ...newPatient, permissions: permissionsFor(user.role, user.status), status: user.status, clinic: null },
+      data: profileOf(newPatient, user),
     });
   } catch (error) {
     console.error('❌ Error creating patient:', error.message);
@@ -142,10 +148,145 @@ async function createPatient(req, res, next) {
 }
 
 /**
- * Where an account without a profile goes next: phone (or debug guest) sign-ins
- * register as patients; email sign-ins verify their email, then apply as staff.
+ * @route   POST /api/patients/register
+ * @desc    Staff register a walk-in patient who has no account (user_id null).
+ *          The patient claims it later: phone OTP on that number + date of birth.
+ * @access  Private — patient:register
  */
-function nextStep(authUser) {
+async function registerPatientAtDesk(req, res, next) {
+  try {
+    const body = req.body || {};
+    const invalid = formError(body);
+    if (invalid) return res.status(400).json({ success: false, error: 'Bad Request', message: invalid });
+    const phone = toE164(body.phone);
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Bad Request',
+        message: 'Field "phone" is required (10-digit Indian mobile, or with its country code).',
+      });
+    }
+
+    const existing = await prisma.patient.findUnique({ where: { phone }, select: { id: true, health_id: true, name: true } });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        error: 'Conflict',
+        message: `A patient is already registered with this phone (${existing.health_id}).`,
+        data: existing,
+      });
+    }
+
+    const patient = await prisma.patient.create({
+      data: {
+        health_id: await generateUniqueHealthId(prisma),
+        name: body.name.trim(),
+        phone,
+        dob: new Date(body.dob),
+        gender: body.gender,
+        language_pref: body.language_pref.trim(),
+        registered_by_user_id: req.user.db_id,
+      },
+    });
+    return res.status(201).json({ success: true, message: 'Patient registered.', data: patient });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ success: false, error: 'Conflict', message: 'A patient is already registered with this phone.' });
+    }
+    next(error);
+  }
+}
+
+const CLAIM_MAX_FAILURES = 5;
+const CLAIM_LOCK_MS = 24 * 60 * 60 * 1000;
+
+/** A desk-registered profile (no account yet) waiting on this verified phone. */
+async function claimablePatient(phoneNumber) {
+  const phone = toE164(phoneNumber);
+  if (!phone) return null;
+  const patient = await prisma.patient.findUnique({ where: { phone } });
+  return patient && !patient.user_id ? patient : null;
+}
+
+/**
+ * @route   POST /api/patients/claim  { dob: "YYYY-MM-DD" }
+ * @desc    Link a desk-registered profile to the signed-in account. The token
+ *          phone proves the number; the date of birth stops a mistyped number
+ *          from handing someone's history to whoever owns it.
+ *          5 wrong dates lock the claim for 24 hours.
+ * @access  Private — phone sign-in with no patient profile
+ */
+async function claimPatient(req, res, next) {
+  const fail = (status, message, extra = {}) =>
+    res.status(status).json({ success: false, error: STATUS_CODES[status], message, ...extra });
+  try {
+    const dob = String(req.body?.dob || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || isNaN(Date.parse(dob))) {
+      return fail(400, 'Field "dob" is required as YYYY-MM-DD.');
+    }
+
+    const existingUser = await prisma.user.findUnique({ where: { firebase_uid: req.user.uid }, include: { patient: true } });
+    if (existingUser && (existingUser.role !== 'PATIENT' || existingUser.patient)) {
+      return fail(409, 'This account already has a profile.');
+    }
+
+    const patient = await claimablePatient(req.user.phone_number);
+    if (!patient) return fail(404, 'No clinic-registered profile is waiting for this phone number.');
+
+    // Take one attempt atomically, so parallel guesses can't beat the limit.
+    const now = new Date();
+    const taken = await prisma.patient.updateMany({
+      where: {
+        id: patient.id,
+        user_id: null,
+        claim_failures: { lt: CLAIM_MAX_FAILURES },
+        OR: [{ claim_locked_until: null }, { claim_locked_until: { lt: now } }],
+      },
+      data: { claim_failures: { increment: 1 } },
+    });
+    if (taken.count === 0) {
+      return fail(423, 'Too many wrong dates of birth. Try again in 24 hours, or ask the clinic.');
+    }
+
+    if (patient.dob.toISOString().slice(0, 10) !== dob) {
+      const after = await prisma.patient.findUnique({ where: { id: patient.id } });
+      const left = CLAIM_MAX_FAILURES - after.claim_failures;
+      if (left <= 0) {
+        await prisma.patient.update({
+          where: { id: patient.id },
+          data: { claim_failures: 0, claim_locked_until: new Date(Date.now() + CLAIM_LOCK_MS) },
+        });
+        return fail(423, 'Too many wrong dates of birth. Try again in 24 hours, or ask the clinic.');
+      }
+      return fail(403, `The date of birth does not match. ${left} attempt${left === 1 ? '' : 's'} left.`, { attempts_left: left });
+    }
+
+    const { user, linked } = await prisma.$transaction(async (tx) => {
+      const user = existingUser ?? await tx.user.create({
+        data: { firebase_uid: req.user.uid, phone: patient.phone, role: 'PATIENT' },
+      });
+      const claimed = await tx.patient.updateMany({
+        where: { id: patient.id, user_id: null },
+        data: { user_id: user.id, claim_failures: 0, claim_locked_until: null },
+      });
+      if (claimed.count !== 1) throw Object.assign(new Error('Profile was already claimed.'), { code: 'P2002' });
+      return { user, linked: await tx.patient.findUnique({ where: { id: patient.id } }) };
+    });
+
+    return res.json({ success: true, message: 'Profile linked.', data: profileOf(linked, user) });
+  } catch (error) {
+    if (error.code === 'P2002') return fail(409, 'This profile or phone is already linked to another account.');
+    next(error);
+  }
+}
+
+/**
+ * Where an account without a profile goes next: phone (or debug guest) sign-ins
+ * register as patients, or claim a desk-registered profile on that phone;
+ * email sign-ins verify their email, then apply as staff.
+ */
+async function nextStep(authUser) {
+  if (await claimablePatient(authUser.phone_number)) return 'CLAIM';
   if (authUser.phone_number || authUser.sign_in_provider === 'anonymous') return 'REGISTER';
   if (!authUser.email_verified) return 'VERIFY_EMAIL';
   return 'STAFF_APPLY';
@@ -176,7 +317,7 @@ async function getMyProfile(req, res, next) {
         success: false,
         error: 'Not Found',
         message: 'User account not registered yet. Please register first.',
-        next: nextStep(req.user),
+        next: await nextStep(req.user),
       });
     }
 
@@ -200,7 +341,7 @@ async function getMyProfile(req, res, next) {
           success: false,
           error: 'Not Found',
           message: 'Patient profile not registered yet for this account. Please register first via POST /api/patients.',
-          next: 'REGISTER',
+          next: await nextStep(req.user),
         });
       }
       return res.json({ success: true, data: { ...user.patient, ...access, user: userInfo } });
@@ -412,6 +553,8 @@ async function searchPatients(req, res, next) {
 
 module.exports = {
   createPatient,
+  registerPatientAtDesk,
+  claimPatient,
   getMyProfile,
   getPatientById,
   updatePatient,

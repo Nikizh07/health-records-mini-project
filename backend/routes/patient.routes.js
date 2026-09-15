@@ -25,6 +25,20 @@ router.use(authenticate);
 router.post('/', patientController.createPatient);
 
 /**
+ * @route   POST /api/patients/register
+ * @desc    Staff register a walk-in patient with no account (claimed later)
+ * @access  Private — patient:register
+ */
+router.post('/register', requirePermission('patient:register'), patientController.registerPatientAtDesk);
+
+/**
+ * @route   POST /api/patients/claim
+ * @desc    Link a desk-registered profile to this phone sign-in, by date of birth
+ * @access  Private (Authenticated, verified phone)
+ */
+router.post('/claim', patientController.claimPatient);
+
+/**
  * @route   GET /api/patients/me
  * @desc    Fetch profile of currently authenticated patient
  * @access  Private (Self)

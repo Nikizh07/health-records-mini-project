@@ -1,6 +1,6 @@
 # Plan: Registration, RBAC and patient consent
 
-**Status (2026-09-15): Phases 1–3 done. Phase 4 built and tested; its click-through in a real browser is pending. Phases 5–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
+**Status (2026-09-15): Phases 1–3 done. Phases 4 and 5 built and tested; their click-throughs in a real browser are pending. Phases 6–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
 
 ## Context
 
@@ -246,7 +246,7 @@ Every allowed read of patient data writes a `PatientAccessLog` row.
 3. A second doctor self-applies and sees the pending screen.
 4. The clinic admin approves, and the second doctor lands on the portal.
 
-## Phase 5: Patient sign-in and desk registration
+## Phase 5: Patient sign-in and desk registration 🟡 built 2026-09-15, user click-through pending
 
 **Goal:** patients can use Google or email (with a linked phone), and staff can register a patient who is later claimed by DOB.
 

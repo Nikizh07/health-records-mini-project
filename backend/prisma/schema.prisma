@@ -79,6 +79,13 @@ model Patient {
   language_pref String
   created_at    DateTime @default(now())
 
+  // Desk registration (Auth Phase 5): staff create the profile with no account
+  // (user_id null); the patient claims it later by phone OTP + date of birth.
+  // Audit only, no FK, so removing a staff user never blocks on it.
+  registered_by_user_id String?   @db.Uuid
+  claim_failures        Int       @default(0)
+  claim_locked_until    DateTime?
+
   user               User?              @relation(fields: [user_id], references: [id], onDelete: Cascade)
   appointments       Appointment[]
   medical_records    MedicalRecord[]

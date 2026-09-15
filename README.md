@@ -38,7 +38,8 @@ This project closes that gap with a **shared, multi-clinic health record system*
 
 **For patients**
 - **Portable health ID**: every patient gets an ID like `MWH-XXXXXX` that works at every registered clinic
-- **Phone OTP login** via Firebase Auth, with no passwords to manage (guest login only in test builds)
+- **Sign in** with phone OTP, Google or email. Google and email accounts add a verified mobile number. Guest login only in test builds.
+- **Registered at the clinic first?** Staff can register a patient who has no phone app. When that patient later signs in on the same number, they confirm their date of birth and get their existing health ID and history.
 - **Appointments at any clinic**: book, reschedule or cancel. Clinics are listed nearest first.
 - **Health records**: diagnoses, prescriptions, visit notes and attached reports from every clinic in one place
 - **Multilingual UI** in English, Hindi and Tamil

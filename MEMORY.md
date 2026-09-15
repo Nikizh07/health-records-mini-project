@@ -35,7 +35,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - ~~Known gap: same-visit pairs don't fire~~ — closed 2026-09-12.
 
 ## Planned: registration, RBAC and patient consent
-- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-3 done; Phase 4 built and tested (2026-09-15), user click-through pending; next is 5 or 7.**
+- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-3 done; Phases 4-5 built and tested (2026-09-15), user click-throughs pending; next is 6 or 7.**
 - Split into 8 phases, one migration per phase (2026-09-13):
   1. identity hardening
   2. roles + permission table
@@ -69,6 +69,18 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-15: Auth/RBAC Phase 5 — patient sign-in and desk registration.**
+  - Migration `20260915180000_add_patient_registered_by`: `patients` += `registered_by_user_id` (plain UUID, no FK, so removing a staff user never blocks), `claim_failures`, `claim_locked_until`.
+  - **Desk registration is `POST /patients/register`, not `POST /patients` as the plan said**: the Phase 2 matrix test decides pass/fail from the permission gate's 403 message, so `patient:register` needs its own gated route. Body `{name, dob, gender, language_pref, phone}`; the phone goes through `toE164` (10 digits get +91). Duplicate phone → 409 with the existing patient in `data`.
+  - `/patients/me` 404 now can say **`next: 'CLAIM'`**: the verified token phone matches a patient with `user_id = null`. Checked before REGISTER, in both 404 branches.
+  - `POST /patients/claim {dob: YYYY-MM-DD}`: 403 with `attempts_left` on a wrong date. **5 wrong dates lock the claim for 24 hours (423)** rather than forever, since there is no unlock screen. The attempt is taken atomically (`updateMany … claim_failures < 5`) before comparing, so parallel guesses can't beat the limit (tested with 8 in parallel).
+  - `POST /patients` now refuses a staff account (403) instead of giving it a patient profile.
+  - App: the patient side has **Continue with Google** and **Use email and password** next to phone OTP. The choice is stored (`SecureStorageService.savePatientIntent`) because the backend can't tell a patient's Google account from a staff one: `/me` says STAFF_APPLY for both. A patient-side sign-in whose Firebase user has no phone goes to **`/link-phone`** (`LoginScreen(linkPhone: true)`), and the OTP links the phone (`linkWithPhoneNumber` on web, `linkWithCredential` on mobile) instead of signing in. Then `/me` says REGISTER or CLAIM.
+  - Only staff email sign-ups get the verification email; patients need a verified phone, not email.
+  - New `auth/claim_profile_screen.dart` (`/claim`). Linking a phone that already has its own Firebase account fails with "This number already has an account. Sign out and sign in with the phone number instead."
+  - Tests: `test-auth-rbac.js` 201/201 (desk registration, 409, E.164, Google without phone refused, staff can't self-register, CLAIM, wrong/right DOB, twice → 409, lock, parallel guesses); `test-interactions.js` 112/112; `flutter test` 16 passed, 2 skipped. Postman: `03. Patient Module` requests 5 and 6.
+  - **Gotcha:** `npx prisma migrate diff … | tee migration.sql` also captures npm's `npm notice` lines, so the deploy fails on line 1 and is recorded as failed. Fix with `prisma migrate resolve --rolled-back <name>` and deploy again.
+  - Known gaps: no desk-registration screen until Phase 6 (API only). A mistyped desk phone blocks its real owner from self-registering (phone is unique); staff must correct it, and there is no edit-phone endpoint yet.
 - **2026-09-15: Auth/RBAC Phase 4 — staff sign-in and onboarding UI.** App only; no backend change.
   - `auth_service.dart`: `signInWithEmail`, `signUpWithEmail` (sends the verification email), `sendEmailVerification`, `sendPasswordReset`, `signInWithGoogle` (popup on web, `signInWithProvider` on mobile), `reloadUser`. No new packages.
   - `PatientService.getMyProfile` now returns `{'next': ...}` on a 404 instead of null. `statusForProfile()` in `auth_provider.dart` maps it: `VERIFY_EMAIL` → `needsEmailVerification`, `STAFF_APPLY` → `needsStaffApplication`, a `PENDING` profile → `pendingApproval`. Only real profiles are cached.
