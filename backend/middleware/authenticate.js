@@ -19,6 +19,7 @@
 
 const { auth } = require('../config/firebase');
 const prisma = require('../config/prisma');
+const { permissionsFor } = require('../config/permissions');
 
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -76,6 +77,15 @@ async function authenticate(req, res, next) {
       include: { patient: true, doctor: true },
     });
 
+    // A disabled account is refused everywhere, even with a valid token.
+    if (dbUser?.status === 'DISABLED') {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'This account has been disabled. Contact your clinic administrator.',
+      });
+    }
+
     req.user = {
       uid: decodedToken.uid,
       phone_number: decodedToken.phone_number || null,
@@ -83,6 +93,9 @@ async function authenticate(req, res, next) {
       email_verified: decodedToken.email_verified === true,
       sign_in_provider: signInProvider,
       role: dbUser?.role || null,
+      status: dbUser?.status || null,
+      clinic_id: dbUser?.doctor?.clinic_id ?? dbUser?.clinic_id ?? null,
+      permissions: permissionsFor(dbUser?.role, dbUser?.status),
       db_id: dbUser?.id || null,
       patient_id: dbUser?.patient?.id || null,
       doctor_id: dbUser?.doctor?.id || null,

@@ -8,7 +8,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phase 1 done
+├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-2 done
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
@@ -38,6 +38,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   ├── .env (local secrets — never commit/print), .env.example, .gitignore
 │   ├── config/
 │   │   ├── prisma.js              # PrismaClient singleton (pg Pool adapter) — the real DB client
+│   │   ├── permissions.js         # the one role → permission table + permissionsFor() + outsideOwnClinic()
 │   │   ├── firebase.js            # Firebase Admin init (key file → ADC fallback)
 │   │   ├── firebase-adminsdk.json # service account key (gitignored, SECRET)
 │   │   └── db.js                  # UNUSED raw pg Pool (safe to delete)
@@ -55,8 +56,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │                              # createMedicalRecord's check_id / override_reason audit wiring
 │   ├── middleware/
 │   │   ├── authenticate.js        # verifies Firebase ID token → req.user
-│   │   ├── requireRole.js         # role gate (PATIENT / DOCTOR / ADMIN)
-│   │   ├── authorizePatientAccess.js
+│   │   ├── requirePermission.js   # permission gate (any of the listed permissions)
+│   │   ├── authorizePatientAccess.js  # self, or patient:lookup for demographics
 │   │   ├── upload.js              # multer local-disk storage, 5 MB, PDF/PNG/JPG/WEBP
 │   │   ├── errorHandler.js, notFound.js
 │   ├── prompts/
@@ -70,7 +71,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   ├── prisma/
 │   │   ├── schema.prisma          # + DrugInteraction, InteractionCheck, InteractionSeverity
 │   │   └── migrations/            # 20260810170839_init_schema, 20260910082706,
-│   │                              # 20260912122022_add_drug_interactions, 20260912122039_add_history_indexes
+│   │                              # 20260912122022_add_drug_interactions, 20260912122039_add_history_indexes,
+│   │                              # 20260915000000_add_roles_status
 │   ├── utils/
 │   │   ├── healthId.js            # MWH-XXXXXX health ID generator
 │   │   ├── phone.js               # toE164(): every stored/matched phone goes through it (+91 default)
@@ -92,7 +94,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     ├── pubspec.yaml, l10n.yaml, analysis_options.yaml
     ├── flutter_launcher_icons.yaml, flutter_native_splash.yaml
     ├── assets/icons/              # app_icon.png, splash_logo.png
-    ├── test/widget_test.dart, clinic_shell_test.dart (role gate),
+    ├── test/widget_test.dart, clinic_shell_test.dart (permission gate),
     │   clinic_flow_test.dart (doctor/admin screens via real router + fake services),
     │   interaction_contract_test.dart (client↔API field names; skips without a live backend)
     ├── lib/
@@ -121,7 +123,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   │   │   ├── dashboard/     # dashboard_screen (+ chatbot placeholder) + widgets/dashboard_header_card
     │   │   │   ├── appointments/  # appointments_screen, book_appointment_screen
     │   │   │   ├── records/       # records_screen, record_detail_screen (opens report URL)
-    │   │   │   ├── clinic/clinic_shell.dart   # wraps signed-in routes: auth wait, role gate, staff side nav on wide screens
+    │   │   │   ├── clinic/clinic_shell.dart   # wraps signed-in routes: auth wait, permission gate, permission-filtered staff side nav on wide screens
     │   │   │   ├── doctor/doctor_screens.dart # queue, add visit record, patient lookup;
     │   │   │   │                              # _InteractionBanner = drug conflict warning + override reason
     │   │   │   ├── admin/admin_screens.dart   # manage doctors, manage clinics

@@ -6,10 +6,12 @@
 // Phase 1: identity hardening — role from the DB only, phone only from the
 // verified token, no phone-based identity fallbacks, guests refused in
 // production.
+// Phase 2: roles + permission table — a role × endpoint matrix generated from
+// config/permissions.js, account status, clinic scope.
 //
 // Same harness as scripts/test-interactions.js: Firebase is stubbed in
 // require.cache before the app loads and the real Express app is driven over
-// HTTP, so authenticate → requireRole → controller → errorHandler all run.
+// HTTP, so authenticate → requirePermission → controller → errorHandler all run.
 //
 // Usage:
 //   node scripts/test-auth-rbac.js          (DATABASE_URL from backend/.env)
@@ -53,6 +55,7 @@ require.cache[firebasePath] = {
 
 const prisma = require(path.join(BACKEND, 'config/prisma'));
 const { toE164 } = require(path.join(BACKEND, 'utils/phone'));
+const { PERMISSIONS } = require(path.join(BACKEND, 'config/permissions'));
 
 const quiet = !process.env.VERBOSE;
 if (quiet) {
@@ -115,6 +118,7 @@ async function api(method, endpoint, { token: tok, body } = {}) {
   return { status: res.status, body: json };
 }
 
+const gateDenied = (r) => r.status === 403 && /Requires permission/.test(r.body?.message || '');
 const detail = (r) => `(got ${r.status}: ${r.body?.message || ''})`;
 
 async function main() {
@@ -226,10 +230,10 @@ async function main() {
 
   const before = await prisma.medicalRecord.count({ where: { patient_id: patient.id } });
   r = await api('POST', '/records', { token: ADMIN, body: { patient_id: patient.id, diagnosis: 'Checkup' } });
-  ok('an ADMIN without doctor_id gets 400, not a random doctor', r.status === 400, detail(r));
-  ok('…and nothing is saved', (await prisma.medicalRecord.count({ where: { patient_id: patient.id } })) === before);
+  ok('an ADMIN cannot save a visit (record:write is DOCTOR only, since Phase 2)', r.status === 403, detail(r));
   r = await api('POST', '/records', { token: ADMIN, body: { patient_id: patient.id, diagnosis: 'Checkup', doctor_id: doctorB.id } });
-  ok('an ADMIN naming the doctor can still save', r.status === 201, detail(r));
+  ok('…not even naming the doctor', r.status === 403, detail(r));
+  ok('…and nothing is saved', (await prisma.medicalRecord.count({ where: { patient_id: patient.id } })) === before);
   r = await api('POST', '/records', { token: NO_DOC, body: { patient_id: patient.id, diagnosis: 'Checkup' } });
   ok('a DOCTOR role with no doctor profile cannot save', r.status === 403, detail(r));
 
@@ -245,6 +249,149 @@ async function main() {
   r = await api('GET', '/appointments/me', { token: token({ uid: 'phonematch', phone: patient.phone }) });
   ok("a matching phone does not unlock another patient's appointments", r.status === 404, detail(r));
 
+
+  // ═══════════════════════════════════════════════════════════
+  // Phase 2: roles and permission table
+  // ═══════════════════════════════════════════════════════════
+  const clinic2 = await prisma.clinic.create({
+    data: { name: `${TAG} Clinic 2`, location: 'Test', contact_number: `${TAG}-c2` },
+  });
+  const doctorOther = await prisma.doctor.create({
+    data: { clinic_id: clinic2.id, name: `${TAG} Dr Other`, specialization: 'GP', phone: `+6015${N}` },
+  });
+  const patientUser = await prisma.user.create({ data: { firebase_uid: `${TAG}-p2pat`, phone: `+9193${N}`, role: 'PATIENT' } });
+  const patient2 = await prisma.patient.create({
+    data: { user_id: patientUser.id, health_id: `${TAG}-hid2`, name: 'P2 Patient', phone: `+9193${N}`, dob: new Date('1991-01-01'), gender: 'Male', language_pref: 'Hindi' },
+  });
+  await prisma.user.create({ data: { firebase_uid: `${TAG}-p2recep`, email: `recep-${TAG}@example.com`, role: 'RECEPTIONIST', clinic_id: clinic.id } });
+  await prisma.user.create({ data: { firebase_uid: `${TAG}-p2cadmin`, email: `cadmin-${TAG}@example.com`, role: 'CLINIC_ADMIN', clinic_id: clinic.id } });
+  const pendingUser = await prisma.user.create({ data: { firebase_uid: `${TAG}-p2pending`, email: `pending-${TAG}@example.com`, role: 'DOCTOR', status: 'PENDING' } });
+  await prisma.doctor.create({ data: { user_id: pendingUser.id, clinic_id: clinic.id, name: `${TAG} Dr Pending`, specialization: 'GP', email: `pending-${TAG}@example.com` } });
+  await prisma.user.create({ data: { firebase_uid: `${TAG}-p2disabled`, email: `disabled-${TAG}@example.com`, role: 'ADMIN', status: 'DISABLED' } });
+
+  const AS = {
+    PATIENT: token({ uid: 'p2pat', phone: `+9193${N}` }),
+    RECEPTIONIST: token({ uid: 'p2recep', provider: 'password' }),
+    DOCTOR: DOC_A, // linked to doctorA at `clinic` above
+    CLINIC_ADMIN: token({ uid: 'p2cadmin', provider: 'password' }),
+    ADMIN,
+  };
+  const PENDING = token({ uid: 'p2pending', provider: 'password' });
+  const DISABLED = token({ uid: 'p2disabled', provider: 'password' });
+
+  // One request per permission, gated by that permission alone. A holder gets
+  // past the gate; everyone else gets the gate's own 403. The message is checked
+  // because a controller can also answer 403 and would hide a loosened gate.
+  const ENDPOINTS = {
+    'self:profile': ['GET', '/appointments/me'],
+    'patient:lookup': ['GET', '/patients/search?q=a'],
+    'appointment:manage': ['GET', '/appointments?status=bogus'],
+    'record:read': ['GET', '/protected/doctor-only'],
+    'record:write': ['POST', '/records', {}],
+    'interaction:check': ['POST', '/records/interaction-check', {}],
+    'report:upload': ['POST', '/records/not-a-uuid/upload'],
+    'staff:manage': ['POST', '/doctors', {}],
+    'clinic:update': ['PUT', '/clinics/not-a-uuid', {}],
+    'clinic:create': ['POST', '/clinics', {}],
+  };
+  // Permissions whose endpoints arrive in a later phase.
+  const LATER = ['consent:respond', 'patient:register', 'consent:request', 'consent:emergency', 'audit:read'];
+
+  section('Phase 2 · every permission in the table is tested');
+  const allPerms = [...new Set(Object.values(PERMISSIONS).flat())];
+  const untested = allPerms.filter((p) => !ENDPOINTS[p] && !LATER.includes(p));
+  ok('every permission has an endpoint in the matrix or is listed as later', untested.length === 0, `(untested: ${untested})`);
+  ok('the table has exactly the 5 roles', Object.keys(PERMISSIONS).sort().join() === 'ADMIN,CLINIC_ADMIN,DOCTOR,PATIENT,RECEPTIONIST');
+
+  section('Phase 2 · role × endpoint matrix (from config/permissions.js)');
+  for (const [perm, [method, endpoint, body]] of Object.entries(ENDPOINTS)) {
+    for (const [role, tok] of Object.entries(AS)) {
+      const has = PERMISSIONS[role].includes(perm);
+      r = await api(method, endpoint, { token: tok, body });
+      ok(`${role.padEnd(12)} ${has ? 'passes' : 'blocked'}  ${perm} (${method} ${endpoint})`,
+        has ? r.status !== 401 && !gateDenied(r) : gateDenied(r), detail(r));
+    }
+    r = await api(method, endpoint, { token: PENDING, body });
+    ok(`PENDING      blocked  ${perm}`, gateDenied(r), detail(r));
+  }
+
+  section('Phase 2 · /patients/me sends permissions, status and clinic');
+  for (const [role, tok] of Object.entries(AS)) {
+    r = await api('GET', '/patients/me', { token: tok });
+    ok(`${role} /me lists exactly its table permissions`,
+      r.status === 200 && JSON.stringify(r.body?.data?.permissions) === JSON.stringify(PERMISSIONS[role]), detail(r));
+  }
+  r = await api('GET', '/patients/me', { token: AS.CLINIC_ADMIN });
+  ok('a clinic admin gets a staff profile with its clinic', r.body?.data?.status === 'ACTIVE' && r.body?.data?.clinic?.id === clinic.id, detail(r));
+  r = await api('GET', '/patients/me', { token: AS.DOCTOR });
+  ok("a doctor's clinic is the doctor row's clinic", r.body?.data?.clinic?.id === clinic.id, detail(r));
+  r = await api('GET', '/patients/me', { token: PENDING });
+  ok('a PENDING user can load /me, with status PENDING and no permissions',
+    r.status === 200 && r.body?.data?.status === 'PENDING' && r.body?.data?.permissions?.length === 0, detail(r));
+
+  section('Phase 2 · account status');
+  r = await api('GET', '/patients/me', { token: DISABLED });
+  ok('a DISABLED user gets 403 even on /me', r.status === 403, detail(r));
+  r = await api('GET', '/clinics', { token: DISABLED });
+  ok('…and on open authenticated routes', r.status === 403, detail(r));
+
+  section('Phase 2 · records are DOCTOR only (plus a patient\'s own)');
+  for (const role of ['ADMIN', 'RECEPTIONIST', 'CLINIC_ADMIN']) {
+    r = await api('GET', `/records/patient/${patient.id}`, { token: AS[role] });
+    ok(`${role} cannot read a patient's history`, r.status === 403, detail(r));
+  }
+  const rec = await prisma.medicalRecord.findFirst({ where: { patient_id: patient.id } });
+  r = await api('GET', `/records/${rec.id}`, { token: AS.RECEPTIONIST });
+  ok('RECEPTIONIST cannot read a single record', r.status === 403, detail(r));
+  r = await api('GET', `/records/patient/${patient.id}`, { token: AS.DOCTOR });
+  ok('DOCTOR can read the history', r.status === 200, detail(r));
+  r = await api('GET', `/records/patient/${patient2.id}`, { token: AS.PATIENT });
+  ok('a patient reads their own history', r.status === 200, detail(r));
+  r = await api('GET', `/records/patient/${patient.id}`, { token: AS.PATIENT });
+  ok("a patient cannot read someone else's history", r.status === 403, detail(r));
+  r = await api('GET', `/patients/${patient.id}`, { token: AS.ADMIN });
+  ok('ADMIN no longer opens patient profiles (no patient:lookup)', r.status === 403, detail(r));
+  r = await api('GET', `/patients/${patient.id}`, { token: AS.RECEPTIONIST });
+  ok('RECEPTIONIST opens patient demographics (patient:lookup)', r.status === 200, detail(r));
+
+  section('Phase 2 · clinic scope');
+  r = await api('PUT', `/clinics/${clinic2.id}`, { token: AS.CLINIC_ADMIN, body: { location: 'Elsewhere' } });
+  ok("a CLINIC_ADMIN cannot update another clinic", r.status === 403, detail(r));
+  r = await api('PUT', `/clinics/${clinic.id}`, { token: AS.CLINIC_ADMIN, body: { location: 'Moved' } });
+  ok('a CLINIC_ADMIN updates their own clinic', r.status === 200, detail(r));
+  r = await api('PUT', `/clinics/${clinic2.id}`, { token: ADMIN, body: { location: 'Anywhere' } });
+  ok('ADMIN updates any clinic', r.status === 200, detail(r));
+  r = await api('POST', '/doctors', { token: AS.CLINIC_ADMIN, body: { name: `${TAG} Dr X`, clinic_id: clinic2.id, specialization: 'GP', phone: `+6016${N}` } });
+  ok("a CLINIC_ADMIN cannot add a doctor to another clinic", r.status === 403, detail(r));
+  r = await api('PUT', `/doctors/${doctorOther.id}`, { token: AS.CLINIC_ADMIN, body: { name: 'Renamed' } });
+  ok("a CLINIC_ADMIN cannot edit another clinic's doctor", r.status === 403, detail(r));
+  r = await api('PUT', `/doctors/${doctorB.id}`, { token: AS.CLINIC_ADMIN, body: { clinic_id: clinic2.id } });
+  ok('a CLINIC_ADMIN cannot move their doctor to another clinic', r.status === 403, detail(r));
+  r = await api('PUT', `/doctors/${doctorB.id}`, { token: AS.CLINIC_ADMIN, body: { specialization: 'Dermatology' } });
+  ok('a CLINIC_ADMIN edits their own doctor', r.status === 200, detail(r));
+
+  await prisma.appointment.create({
+    data: { patient_id: patient2.id, doctor_id: doctorOther.id, clinic_id: clinic2.id, slot_time: new Date() },
+  });
+  r = await api('GET', '/appointments', { token: AS.RECEPTIONIST });
+  ok("clinic staff list only their own clinic's appointments",
+    r.status === 200 && r.body.data.length > 0 && r.body.data.every((a) => a.clinic_id === clinic.id), detail(r));
+  r = await api('GET', `/appointments?clinic_id=${clinic2.id}`, { token: AS.RECEPTIONIST });
+  ok('…and cannot ask for another clinic', r.status === 403, detail(r));
+  r = await api('POST', '/appointments', { token: AS.RECEPTIONIST, body: { patient_id: patient2.id, doctor_id: doctorOther.id } });
+  ok("a walk-in with another clinic's doctor is refused", r.status === 403, detail(r));
+  r = await api('POST', '/appointments', { token: AS.DOCTOR, body: { patient_id: patient2.id, doctor_id: doctorB.id } });
+  ok("a doctor cannot book a walk-in on a colleague's schedule", r.status === 403, detail(r));
+  r = await api('POST', '/appointments', { token: AS.RECEPTIONIST, body: { patient_id: patient2.id, doctor_id: doctorB.id } });
+  ok('a receptionist books a walk-in with their own clinic\'s doctor', r.status === 201, detail(r));
+  const otherAppt = await prisma.appointment.findFirst({ where: { clinic_id: clinic2.id } });
+  r = await api('PATCH', `/appointments/${otherAppt.id}/cancel`, { token: AS.CLINIC_ADMIN });
+  ok("a CLINIC_ADMIN cannot cancel another clinic's appointment", r.status === 403, detail(r));
+  r = await api('PATCH', `/appointments/${otherAppt.id}/cancel`, { token: ADMIN });
+  ok('ADMIN no longer manages appointments', r.status === 403, detail(r));
+  r = await api('PATCH', `/appointments/${otherAppt.id}/cancel`, { token: AS.PATIENT });
+  ok('the patient cancels their own appointment', r.status === 200, detail(r));
+
   // ───────────────────────────────────────────────────────────
   section('A database failure is a 500, not a logout');
   const findUnique = prisma.user.findUnique;
@@ -259,21 +406,23 @@ async function main() {
   const users = await prisma.user.findMany({ where: { firebase_uid: { startsWith: TAG } }, select: { id: true } });
   const userIds = users.map((u) => u.id);
   const patients = await prisma.patient.findMany({
-    where: { OR: [{ id: patient.id }, { user_id: { in: userIds } }] },
+    where: { OR: [{ id: { in: [patient.id, patient2.id] } }, { user_id: { in: userIds } }] },
     select: { id: true },
   });
   const patientIds = patients.map((p) => p.id);
   await prisma.medicalRecord.deleteMany({ where: { patient_id: { in: patientIds } } });
   await prisma.appointment.deleteMany({ where: { patient_id: { in: patientIds } } });
   await prisma.patient.deleteMany({ where: { id: { in: patientIds } } });
-  await prisma.doctor.deleteMany({ where: { clinic_id: clinic.id } });
+  const clinicIds = [clinic.id, clinic2.id];
+  await prisma.appointment.deleteMany({ where: { clinic_id: { in: clinicIds } } });
+  await prisma.doctor.deleteMany({ where: { clinic_id: { in: clinicIds } } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
-  await prisma.clinic.delete({ where: { id: clinic.id } });
+  await prisma.clinic.deleteMany({ where: { id: { in: clinicIds } } });
 
   const leftover =
     (await prisma.user.count({ where: { firebase_uid: { startsWith: TAG } } })) +
     (await prisma.patient.count({ where: { id: { in: patientIds } } })) +
-    (await prisma.clinic.count({ where: { id: clinic.id } }));
+    (await prisma.clinic.count({ where: { id: { in: clinicIds } } }));
   ok('fixtures removed', leftover === 0, `${leftover} rows left behind`);
 
   console.log(`\n${'═'.repeat(52)}`);

@@ -3,12 +3,12 @@
 // Appointment Module Router (Day 12)
 // ============================================================
 // All routes require a valid Firebase ID token (authenticate).
-// Role-based restrictions:
-//   - POST   /api/appointments          → PATIENT only
-//   - GET    /api/appointments/me       → PATIENT only
-//   - GET    /api/appointments          → DOCTOR and ADMIN only
-//   - PUT    /api/appointments/:id      → PATIENT (own record) or ADMIN
-//   - PATCH  /api/appointments/:id/cancel → PATIENT (own record) or ADMIN
+// Permissions (config/permissions.js); scope is checked in the controller:
+//   - POST   /api/appointments          → self:profile (book) or appointment:manage (walk-in)
+//   - GET    /api/appointments/me       → self:profile
+//   - GET    /api/appointments          → appointment:manage
+//   - PUT    /api/appointments/:id      → self:profile (own) or appointment:manage (scoped)
+//   - PATCH  /api/appointments/:id/cancel → self:profile (own) or appointment:manage (scoped)
 // ============================================================
 
 'use strict';
@@ -17,7 +17,7 @@ const express = require('express');
 const router = express.Router();
 
 const authenticate = require('../middleware/authenticate');
-const requireRole = require('../middleware/requireRole');
+const requirePermission = require('../middleware/requirePermission');
 const appointmentCtrl = require('../controllers/appointment.controller');
 
 // Apply authentication to all appointment routes
@@ -26,38 +26,38 @@ router.use(authenticate);
 /**
  * @route   POST /api/appointments
  * @desc    Book a new appointment with conflict checking
- *          (DOCTOR/ADMIN: on-the-spot walk-in for body.patient_id)
- * @access  Private — PATIENT, DOCTOR, ADMIN
+ *          (appointment:manage: on-the-spot walk-in for body.patient_id)
+ * @access  Private — self:profile or appointment:manage
  */
-router.post('/', requireRole('PATIENT', 'DOCTOR', 'ADMIN'), appointmentCtrl.bookAppointment);
+router.post('/', requirePermission('self:profile', 'appointment:manage'), appointmentCtrl.bookAppointment);
 
 /**
  * @route   GET /api/appointments/me
  * @desc    List all appointments of the logged-in patient
- * @access  Private — PATIENT only
+ * @access  Private — self:profile
  * NOTE: Must be defined before any /:id param route
  */
-router.get('/me', requireRole('PATIENT'), appointmentCtrl.getMyAppointments);
+router.get('/me', requirePermission('self:profile'), appointmentCtrl.getMyAppointments);
 
 /**
  * @route   GET /api/appointments
  * @desc    List appointments for doctors/admins (optional ?doctor_id= query filter)
- * @access  Private — DOCTOR or ADMIN only
+ * @access  Private — appointment:manage (own schedule / own clinic)
  */
-router.get('/', requireRole('DOCTOR', 'ADMIN'), appointmentCtrl.getAppointments);
+router.get('/', requirePermission('appointment:manage'), appointmentCtrl.getAppointments);
 
 /**
  * @route   PUT /api/appointments/:id
  * @desc    Reschedule an appointment (update slot_time with conflict check)
- * @access  Private — PATIENT (own) or ADMIN
+ * @access  Private — self:profile (own) or appointment:manage (scoped)
  */
-router.put('/:id', requireRole('PATIENT', 'ADMIN'), appointmentCtrl.rescheduleAppointment);
+router.put('/:id', requirePermission('self:profile', 'appointment:manage'), appointmentCtrl.rescheduleAppointment);
 
 /**
  * @route   PATCH /api/appointments/:id/cancel
  * @desc    Soft-cancel an appointment (sets status='cancelled', frees slot)
- * @access  Private — PATIENT (own) or ADMIN
+ * @access  Private — self:profile (own) or appointment:manage (scoped)
  */
-router.patch('/:id/cancel', requireRole('PATIENT', 'ADMIN'), appointmentCtrl.cancelAppointment);
+router.patch('/:id/cancel', requirePermission('self:profile', 'appointment:manage'), appointmentCtrl.cancelAppointment);
 
 module.exports = router;

@@ -22,8 +22,16 @@ enum AppointmentStatus {
 
 enum Role {
   PATIENT
+  RECEPTIONIST
   DOCTOR
+  CLINIC_ADMIN
   ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  PENDING
+  DISABLED
 }
 
 enum InteractionSeverity {
@@ -38,13 +46,17 @@ enum InteractionSeverity {
 // ------------------------------------------------------------
 model User {
   id           String   @id @default(uuid()) @db.Uuid
-  firebase_uid String   @unique
-  phone        String   @unique
-  role         Role     @default(PATIENT)
-  created_at   DateTime @default(now())
+  firebase_uid String     @unique
+  phone        String?    @unique
+  email        String?    @unique
+  role         Role       @default(PATIENT)
+  status       UserStatus @default(ACTIVE)
+  clinic_id    String?    @db.Uuid
+  created_at   DateTime   @default(now())
 
   patient Patient?
   doctor  Doctor?
+  clinic  Clinic?  @relation(fields: [clinic_id], references: [id], onDelete: SetNull)
 
   @@map("users")
 }
@@ -85,6 +97,7 @@ model Clinic {
 
   doctors      Doctor[]
   appointments Appointment[]
+  users        User[]
 
   @@map("clinics")
 }
@@ -98,7 +111,8 @@ model Doctor {
   clinic_id      String   @db.Uuid
   name           String
   specialization String
-  phone          String   @unique
+  phone          String?  @unique
+  email          String?  @unique
   created_at     DateTime @default(now())
 
   user               User?              @relation(fields: [user_id], references: [id], onDelete: Cascade)

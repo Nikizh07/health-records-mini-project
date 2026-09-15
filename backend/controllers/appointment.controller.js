@@ -5,15 +5,16 @@
 // Handles:
 // 1. POST   /api/appointments          — Patient books appointment (with conflict check)
 // 2. GET    /api/appointments/me       — Logged-in patient views own appointments
-// 3. GET    /api/appointments          — Doctor / Admin views schedule (optional ?doctor_id=)
-// 4. PUT    /api/appointments/:id      — Patient reschedules own appointment (with conflict check)
-// 5. PATCH  /api/appointments/:id/cancel — Patient / Admin cancels appointment (soft cancel)
+// 3. GET    /api/appointments          — Doctor (own schedule) / clinic staff (own clinic)
+// 4. PUT    /api/appointments/:id      — Patient (own) or staff in scope reschedules (with conflict check)
+// 5. PATCH  /api/appointments/:id/cancel — Patient (own) or staff in scope cancels (soft cancel)
 // ============================================================
 
 'use strict';
 
 const prisma = require('../config/prisma');
 const { getAuthenticatedDoctorId } = require('./record.controller');
+const { outsideOwnClinic } = require('../config/permissions');
 
 // Reusable UUID validator regex (8-4-4-4-12)
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -47,6 +48,16 @@ const APPOINTMENT_INCLUDE = {
     },
   },
 };
+
+/**
+ * appointment:manage scope: a doctor manages their own schedule, other clinic
+ * staff their own clinic's appointments.
+ */
+function outsideStaffScope(user, appt) {
+  return user.role === 'DOCTOR'
+    ? appt.doctor_id !== user.doctor_id
+    : outsideOwnClinic(user, appt.clinic_id);
+}
 
 /**
  * Helper: Derives patient ID for the authenticated user.
@@ -105,10 +116,9 @@ async function bookAppointment(req, res, next) {
     let clinic_id = (body.clinic_id || body.clinicID || body.clinicId) ? String(body.clinic_id || body.clinicID || body.clinicId).trim() : null;
     let slot_time = (body.slot_time || body.slotTime) ? String(body.slot_time || body.slotTime).trim() : null;
 
-    // Staff (DOCTOR/ADMIN) create on-the-spot walk-ins for a given patient:
+    // Staff (appointment:manage) create on-the-spot walk-ins for a given patient:
     // doctor defaults to the caller, clinic to that doctor's clinic, time to now.
-    const userRole = (req.user?.role || 'PATIENT').toUpperCase();
-    const isStaff = userRole === 'DOCTOR' || userRole === 'ADMIN';
+    const isStaff = req.user.permissions.includes('appointment:manage');
 
     // ── 1. Resolve Patient ID ────────────────────────────────
     let patient_id;
@@ -200,6 +210,14 @@ async function bookAppointment(req, res, next) {
         success: false,
         error: 'Bad Request',
         message: `Doctor "${doctor.name}" is assigned to clinic "${doctor.clinic?.name}" (${doctor.clinic_id}), not clinic "${clinic_id}".`,
+      });
+    }
+
+    if (isStaff && outsideStaffScope(req.user, { doctor_id, clinic_id })) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'Walk-ins can only be booked for your own schedule or your own clinic.',
       });
     }
 
@@ -307,14 +325,14 @@ async function getMyAppointments(req, res, next) {
  * ------------------------------------------------------------
  * 3. GET /api/appointments
  * ------------------------------------------------------------
- * List appointments for DOCTOR and ADMIN roles.
- * - DOCTOR role: Defaults to viewing their own schedule unless ADMIN.
+ * List appointments for staff with appointment:manage.
+ * - DOCTOR: only their own schedule. Other staff: only their own clinic.
  * - Supports filters: ?doctor_id=, ?clinic_id=, ?status=, ?date=YYYY-MM-DD
  * ------------------------------------------------------------
  */
 async function getAppointments(req, res, next) {
   try {
-    const userRole = (req.user?.role || 'PATIENT').toUpperCase();
+    const userRole = req.user.role;
     const { doctor_id, clinic_id, status, date } = req.query;
 
     const whereClause = {};
@@ -331,8 +349,16 @@ async function getAppointments(req, res, next) {
         });
       }
       whereClause.doctor_id = req.user.doctor_id;
-    } else if (userRole === 'ADMIN') {
-      // Admin can filter by any doctor_id
+    } else {
+      // Other clinic staff see their own clinic's appointments.
+      if (!req.user.clinic_id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'No clinic is assigned to this account.',
+        });
+      }
+      whereClause.clinic_id = req.user.clinic_id;
       if (doctor_id) {
         if (!UUID_REGEX.test(doctor_id)) {
           return res.status(400).json({
@@ -351,6 +377,13 @@ async function getAppointments(req, res, next) {
           success: false,
           error: 'Bad Request',
           message: 'Query parameter "clinic_id" must be a valid UUID.',
+        });
+      }
+      if (whereClause.clinic_id && whereClause.clinic_id !== clinic_id) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'You can only list appointments at your own clinic.',
         });
       }
       whereClause.clinic_id = clinic_id;
@@ -458,10 +491,11 @@ async function rescheduleAppointment(req, res, next) {
     }
 
     // ── 2. Ownership & Status Validation ─────────────────────
-    const patient_id = await getAuthenticatedPatientId(req);
-    const userRole = (req.user?.role || 'PATIENT').toUpperCase();
+    const denied = req.user.permissions.includes('appointment:manage')
+      ? outsideStaffScope(req.user, appointment)
+      : appointment.patient_id !== await getAuthenticatedPatientId(req);
 
-    if (userRole !== 'ADMIN' && appointment.patient_id !== patient_id) {
+    if (denied) {
       return res.status(403).json({
         success: false,
         error: 'Forbidden',
@@ -532,7 +566,7 @@ async function rescheduleAppointment(req, res, next) {
  * 5. PATCH /api/appointments/:id/cancel
  * ------------------------------------------------------------
  * Soft-cancels an appointment by setting status = 'cancelled'.
- * - Accessible by the appointment's patient or an ADMIN.
+ * - Accessible by the appointment's patient or staff in scope.
  * - Preserves historical record while immediately freeing up the slot.
  * ------------------------------------------------------------
  */
@@ -562,10 +596,11 @@ async function cancelAppointment(req, res, next) {
     }
 
     // ── 2. Ownership & Status Validation ─────────────────────
-    const patient_id = await getAuthenticatedPatientId(req);
-    const userRole = (req.user?.role || 'PATIENT').toUpperCase();
+    const denied = req.user.permissions.includes('appointment:manage')
+      ? outsideStaffScope(req.user, appointment)
+      : appointment.patient_id !== await getAuthenticatedPatientId(req);
 
-    if (userRole !== 'ADMIN' && appointment.patient_id !== patient_id) {
+    if (denied) {
       return res.status(403).json({
         success: false,
         error: 'Forbidden',

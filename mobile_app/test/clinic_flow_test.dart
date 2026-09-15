@@ -138,9 +138,13 @@ class _Admin extends AdminService {
 }
 
 Map<String, dynamic> _profile(String role) => switch (role) {
-      'DOCTOR' => {'id': 'd1', 'name': 'Dr. Rao', 'clinic': {'name': 'Central Clinic'}, 'user': {'role': 'DOCTOR'}},
-      'ADMIN' => {'name': 'System Administrator', 'role': 'ADMIN', 'user': {'role': 'ADMIN'}},
-      _ => {'id': 'p9', 'name': 'Pat', 'health_id': 'MWH-X', 'user': {'role': 'PATIENT'}},
+      'DOCTOR' => {'id': 'd1', 'name': 'Dr. Rao', 'clinic': {'name': 'Central Clinic'}, 'user': {'role': 'DOCTOR'},
+          'permissions': ['patient:register', 'patient:lookup', 'appointment:manage', 'record:read', 'record:write',
+              'interaction:check', 'report:upload', 'consent:request', 'consent:emergency']},
+      'ADMIN' => {'name': 'System Administrator', 'role': 'ADMIN', 'user': {'role': 'ADMIN'},
+          'permissions': ['staff:manage', 'clinic:update', 'clinic:create', 'audit:read']},
+      _ => {'id': 'p9', 'name': 'Pat', 'health_id': 'MWH-X', 'user': {'role': 'PATIENT'},
+          'permissions': ['self:profile', 'consent:respond']},
     };
 
 Future<void> _pumpApp(
@@ -408,6 +412,11 @@ void main() {
   testWidgets('admin on PC: doctors in a grid, add-doctor opens as a dialog', (tester) async {
     await _pumpApp(tester, 'ADMIN', '/admin/doctors');
     expect(find.byType(NavigationRail), findsOneWidget);
+    // Admin nav is filtered by permission: no queue, visits or patient history.
+    expect(find.text('Clinics'), findsOneWidget);
+    expect(find.text('Queue'), findsNothing);
+    expect(find.text('New visit'), findsNothing);
+    expect(find.text('Patients'), findsNothing);
     final a = tester.getTopLeft(find.text('Dr. Rao'));
     final b = tester.getTopLeft(find.text('Dr. Iyer'));
     expect(a.dy, b.dy); // side by side

@@ -7,7 +7,7 @@ Running context for this project: what it is, what's decided, and what's in prog
 Cloud-based digital health record and appointment system for migrant worker clinics.
 - **Backend** (`backend/`): Node.js 22, Express 4, Prisma 7 with the `@prisma/adapter-pg` driver adapter, PostgreSQL, Multer for uploads.
 - **Mobile** (`mobile_app/`): Flutter, locales en / hi / ta. It talks only to the backend API (`API_BASE_URL` via `--dart-define`) and never touches the DB or storage directly.
-- **Auth**: Firebase Auth on the client. The backend verifies Firebase ID tokens with `firebase-admin` (`middleware/authenticate.js`). Roles are PATIENT / DOCTOR / ADMIN (`middleware/requireRole.js`).
+- **Auth**: Firebase Auth on the client. The backend verifies Firebase ID tokens with `firebase-admin` (`middleware/authenticate.js`). Roles are PATIENT / RECEPTIONIST / DOCTOR / CLINIC_ADMIN / ADMIN; routes are gated by permission (`config/permissions.js` + `middleware/requirePermission.js`), since 2026-09-15.
 - **Patients** get a health ID in the form `MWH-XXXXXX` (`utils/healthId.js`). Medical history is visible across clinics by design.
 
 ## Current infrastructure (as of 2026-09-12)
@@ -35,7 +35,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - ~~Known gap: same-visit pairs don't fire~~ — closed 2026-09-12.
 
 ## Planned: registration, RBAC and patient consent
-- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phase 1 done (2026-09-13); next is Phase 2.**
+- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-2 done (2026-09-15); next is Phase 3 (or 5/7, which only need Phase 2).**
 - Split into 8 phases, one migration per phase (2026-09-13):
   1. identity hardening
   2. roles + permission table
@@ -69,6 +69,18 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-15: Auth/RBAC Phase 2 — roles and permission table.**
+  - Migration `20260915000000_add_roles_status`: `Role` += `RECEPTIONIST`, `CLINIC_ADMIN`; new `UserStatus` (ACTIVE/PENDING/DISABLED); `users.phone` nullable, new `users.email` (unique), `users.status`, `users.clinic_id`; `doctors.phone` nullable, new `doctors.email` (unique). Generated with `prisma migrate diff` because `migrate dev` refuses a non-interactive shell.
+  - `config/permissions.js` is the §B table. `permissionsFor(role, status)` is empty unless ACTIVE. `outsideOwnClinic(user, clinicId)` is the shared clinic-scope check (ADMIN is exempt).
+  - `requireRole.js` is deleted; every route uses `requirePermission(...)` (any-of). `authenticate` 403s DISABLED users on every route and attaches `status`, `clinic_id` (`doctor.clinic_id ?? user.clinic_id`) and `permissions`.
+  - `/patients/me` (and the `POST /patients` response, which the app stores as the profile) include `permissions`, `status`, `clinic`. CLINIC_ADMIN/RECEPTIONIST get a staff payload instead of falling into the patient 404.
+  - **ADMIN lost** record read/write, patient lookup/profile access and appointment management (the table gives it none). Its app nav is now Dashboard, Doctors, Clinics, Profile.
+  - **Appointment scope was pulled forward from Phase 6** because the new roles hold `appointment:manage` and would otherwise see every appointment: a DOCTOR manages only their own schedule (a walk-in on a colleague's schedule is 403), other staff only their clinic (list, walk-in doctor, reschedule, cancel).
+  - `/patients/search` is still unscoped for any `patient:lookup` holder (now including receptionists and clinic admins); Phase 7 limits it to the caller's clinic.
+  - `scripts/set-user-role.js` takes a phone or email and all 5 roles; `CLINIC_ADMIN`/`RECEPTIONIST` need a `clinic_id` arg. With no users row it creates one from the Firebase account (needs the service-account key).
+  - App: `AuthState.can(permission)`; `ClinicShell.routePermissions` maps each staff page to its API permission, nav and dashboard tiles are filtered by it, and an unknown `/doctor/*` or `/admin/*` page is closed.
+  - Tests: `test-auth-rbac.js` 131/131, with the role × endpoint matrix generated from `permissions.js`. It also fails if a permission has neither an endpoint nor a `LATER` entry.
+  - **Gotcha:** the matrix must check the gate's own 403 message (`Requires permission`). A controller can also 403 (e.g. "No doctor profile"), which hid a deliberately loosened gate until the check was added. `test-interactions.js` 112/112.
 - **2026-09-13: Auth/RBAC Phase 1 — identity hardening.** No new features; the holes are closed.
   - `middleware/authenticate.js`: the role comes **only** from the `users` row. A signed-in Firebase user with no row has `role: null` and gets 403 on every role-gated route (they used to count as PATIENT, and a `role` claim in the token was trusted). `req.user.phone_number` is now the verified token phone only, with no DB fallback. It also attaches `email_verified` and `sign_in_provider`.
   - Anonymous tokens get 401 when `NODE_ENV=production`.

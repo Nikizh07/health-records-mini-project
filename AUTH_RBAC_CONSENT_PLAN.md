@@ -1,6 +1,6 @@
 # Plan: Registration, RBAC and patient consent
 
-**Status (2026-09-13): Phase 1 done. Phases 2–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
+**Status (2026-09-15): Phases 1–2 done. Phases 3–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
 
 ## Context
 
@@ -164,7 +164,7 @@ Every allowed read of patient data writes a `PatientAccessLog` row.
 
 **Done when:** both test scripts pass and the test doctor `+919999900001` still logs in and saves a visit.
 
-## Phase 2: Roles and permission table
+## Phase 2: Roles and permission table ✅ done 2026-09-15
 
 **Goal:** 5 roles, one permission table, and the app gating by permission. There are no new screens yet; ADMIN loses record access.
 

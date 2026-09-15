@@ -7,7 +7,7 @@
 // (PUT /:id).
 //
 // Access Rules:
-//   POST / PUT → ADMIN role only  (enforced in router, not here)
+//   POST / PUT → staff:manage (router); own clinic only for CLINIC_ADMIN (here)
 //   GET        → Any authenticated user
 // ============================================================
 
@@ -15,6 +15,7 @@
 
 const prisma = require('../config/prisma');
 const { toE164 } = require('../utils/phone');
+const { outsideOwnClinic } = require('../config/permissions');
 
 // Reusable UUID format validator
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -30,7 +31,7 @@ const DOCTOR_INCLUDE = {
 /**
  * @route   POST /api/doctors
  * @desc    Register a new doctor linked to an existing clinic
- * @access  Private — ADMIN only
+ * @access  Private — staff:manage (own clinic for CLINIC_ADMIN)
  */
 async function createDoctor(req, res, next) {
   try {
@@ -68,6 +69,14 @@ async function createDoctor(req, res, next) {
         success: false,
         error: 'Bad Request',
         message: 'Field "phone" is required, with its country code (e.g. "+60123456789").',
+      });
+    }
+
+    if (outsideOwnClinic(req.user, clinic_id)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'You can only manage your own clinic.',
       });
     }
 
@@ -200,7 +209,7 @@ async function getDoctorById(req, res, next) {
 /**
  * @route   PUT /api/doctors/:id
  * @desc    Update doctor information (partial update — only send fields to change)
- * @access  Private — ADMIN only
+ * @access  Private — staff:manage (own clinic for CLINIC_ADMIN)
  */
 async function updateDoctor(req, res, next) {
   try {
@@ -222,6 +231,15 @@ async function updateDoctor(req, res, next) {
         success: false,
         error: 'Not Found',
         message: `Doctor with ID "${id}" not found.`,
+      });
+    }
+
+    // A clinic admin can neither edit another clinic's doctor nor move one away.
+    if (outsideOwnClinic(req.user, existing.clinic_id) || (clinic_id && outsideOwnClinic(req.user, clinic_id))) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'You can only manage your own clinic.',
       });
     }
 

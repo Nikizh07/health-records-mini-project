@@ -10,6 +10,7 @@ const router = express.Router();
 
 const authenticate = require('../middleware/authenticate');
 const authorizePatientAccess = require('../middleware/authorizePatientAccess');
+const requirePermission = require('../middleware/requirePermission');
 const patientController = require('../controllers/patient.controller');
 
 
@@ -33,35 +34,25 @@ router.get('/me', patientController.getMyProfile);
 /**
  * @route   GET /api/patients/search?q=<query>
  * @desc    Search patients by partial name or Health ID
- * @access  Private — DOCTOR and ADMIN only
+ * @access  Private — patient:lookup
  *
  * IMPORTANT: This route MUST be declared before GET /:id
  * because Express matches routes sequentially — without this ordering,
  * the /:id wildcard would capture the literal string "search" as an id.
  */
-router.get('/search', (req, res, next) => {
-  const role = (req.user?.role || 'PATIENT').toUpperCase();
-  if (role !== 'DOCTOR' && role !== 'ADMIN') {
-    return res.status(403).json({
-      success: false,
-      error: 'Forbidden',
-      message: 'Only DOCTOR and ADMIN users can search patient records.',
-    });
-  }
-  return next();
-}, patientController.searchPatients);
+router.get('/search', requirePermission('patient:lookup'), patientController.searchPatients);
 
 /**
  * @route   GET /api/patients/:id
  * @desc    Fetch single patient profile by ID
- * @access  Private (Self or Doctor/Admin)
+ * @access  Private (Self or patient:lookup)
  */
 router.get('/:id', authorizePatientAccess, patientController.getPatientById);
 
 /**
  * @route   PUT /api/patients/:id
  * @desc    Update single patient profile
- * @access  Private (Self or Doctor/Admin)
+ * @access  Private (Self or patient:lookup)
  */
 router.put('/:id', authorizePatientAccess, patientController.updatePatient);
 

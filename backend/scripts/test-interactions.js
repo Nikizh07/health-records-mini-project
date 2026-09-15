@@ -4,7 +4,7 @@
 // ============================================================
 // Covers Phase 1 (the cross-clinic checker), Phase 2 (the audit wiring
 // on save) and Phase 4 (the AI leg, against a fake provider), driving the real Express app over HTTP so the genuine
-// authenticate → requireRole → controller → errorHandler stack runs.
+// authenticate → requirePermission → controller → errorHandler stack runs.
 //
 // Firebase is stubbed in require.cache before the app loads, so no
 // service account and no device are needed. Nothing in the app is

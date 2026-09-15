@@ -7,7 +7,7 @@ import '../../../providers/auth_provider.dart';
 /// Wraps every signed-in page.
 /// - Waits for session restore and sends signed-out users to /login
 ///   (matters on web, where a reload can land on any URL).
-/// - Gates /doctor/* (DOCTOR, ADMIN) and /admin/* (ADMIN) by role.
+/// - Gates /doctor/* and /admin/* by permission (see [routePermissions]).
 /// - Gives clinic staff a persistent side navigation on wide (PC / web)
 ///   screens. Patients and phone-sized screens get the page unchanged.
 class ClinicShell extends ConsumerWidget {
@@ -21,22 +21,28 @@ class ClinicShell extends ConsumerWidget {
   static bool isWide(BuildContext context) =>
       MediaQuery.sizeOf(context).width >= wideBreakpoint;
 
-  /// /admin/* is ADMIN only; /doctor/* is DOCTOR or ADMIN; the rest is open.
-  static bool canAccess(String path, String role) => path.startsWith('/admin')
-      ? role == 'ADMIN'
-      : !path.startsWith('/doctor') || role != 'PATIENT';
+  /// The permission each staff page needs. Mirrors the API gate it calls.
+  static const routePermissions = {
+    '/doctor/today-appointments': 'appointment:manage',
+    '/doctor/add-record': 'record:write',
+    '/doctor/patients': 'record:read',
+    '/admin/doctors': 'staff:manage',
+    '/admin/clinics': 'clinic:update',
+  };
 
-  static const _doctorNav = [
+  /// Staff pages need their permission; an unknown /doctor or /admin page is
+  /// closed; everything else is open.
+  static bool canAccess(String path, bool Function(String) can) {
+    for (final MapEntry(:key, :value) in routePermissions.entries) {
+      if (path.startsWith(key)) return can(value);
+    }
+    return !path.startsWith('/doctor') && !path.startsWith('/admin');
+  }
+
+  static const _staffNav = [
     (Icons.dashboard_outlined, 'Dashboard', '/'),
     (Icons.calendar_today_outlined, 'Queue', '/doctor/today-appointments'),
     (Icons.post_add_outlined, 'New visit', '/doctor/add-record'),
-    (Icons.person_search_outlined, 'Patients', '/doctor/patients'),
-    (Icons.account_circle_outlined, 'Profile', '/profile'),
-  ];
-
-  static const _adminNav = [
-    (Icons.dashboard_outlined, 'Dashboard', '/'),
-    (Icons.calendar_today_outlined, 'Appointments', '/doctor/today-appointments'),
     (Icons.person_search_outlined, 'Patients', '/doctor/patients'),
     (Icons.medical_services_outlined, 'Doctors', '/admin/doctors'),
     (Icons.apartment_outlined, 'Clinics', '/admin/clinics'),
@@ -58,11 +64,14 @@ class ClinicShell extends ConsumerWidget {
     }
 
     final role = auth.role;
-    final page = canAccess(path, role) ? child : _AccessRestricted(role: role);
+    final page = canAccess(path, auth.can) ? child : _AccessRestricted(role: role);
 
-    if (role == 'PATIENT' || !isWide(context)) return page;
+    if (auth.can('self:profile') || !isWide(context)) return page;
 
-    final nav = role == 'ADMIN' ? _adminNav : _doctorNav;
+    final nav = [
+      for (final d in _staffNav)
+        if (canAccess(d.$3, auth.can)) d,
+    ];
     final selected =
         nav.indexWhere((d) => d.$3 == '/' ? path == '/' : path.startsWith(d.$3));
     final extended = MediaQuery.sizeOf(context).width >= 1200;

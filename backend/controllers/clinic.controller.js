@@ -6,13 +6,15 @@
 // retrieval (GET /:id), and profile updates (PUT /:id).
 //
 // Access Rules:
-//   POST / PUT → ADMIN role only  (enforced in router, not here)
+//   POST → clinic:create, PUT → clinic:update (router); PUT is own clinic
+//   only for CLINIC_ADMIN (here)
 //   GET        → Any authenticated user
 // ============================================================
 
 'use strict';
 
 const prisma = require('../config/prisma');
+const { outsideOwnClinic } = require('../config/permissions');
 
 // Reusable UUID format validator — prevents Prisma from throwing a
 // type error when a garbage string (e.g. "abc") is used as an ID.
@@ -21,7 +23,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 /**
  * @route   POST /api/clinics
  * @desc    Register a new clinic
- * @access  Private — ADMIN only
+ * @access  Private — clinic:create
  */
 async function createClinic(req, res, next) {
   try {
@@ -146,7 +148,7 @@ async function getClinicById(req, res, next) {
 /**
  * @route   PUT /api/clinics/:id
  * @desc    Update clinic information (partial update — only send fields to change)
- * @access  Private — ADMIN only
+ * @access  Private — clinic:update (own clinic for CLINIC_ADMIN)
  */
 async function updateClinic(req, res, next) {
   try {
@@ -158,6 +160,14 @@ async function updateClinic(req, res, next) {
         success: false,
         error: 'Bad Request',
         message: `"${id}" is not a valid clinic ID format. Expected a UUID.`,
+      });
+    }
+
+    if (outsideOwnClinic(req.user, id)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'You can only manage your own clinic.',
       });
     }
 

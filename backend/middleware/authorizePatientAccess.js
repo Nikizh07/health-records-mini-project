@@ -3,8 +3,8 @@
 // Patient Self-Access Authorization Middleware
 // ============================================================
 // Enforces privacy policy:
-// - DOCTOR and ADMIN roles can access any patient record.
-// - PATIENT role can ONLY access their OWN patient record.
+// - Staff with patient:lookup can open any patient profile (demographics).
+// - Everyone else can ONLY access their OWN patient record.
 // ============================================================
 
 'use strict';
@@ -21,9 +21,9 @@ async function authorizePatientAccess(req, res, next) {
       });
     }
 
-    // Doctors and Admins have global permission to view/edit patient profiles
-    const userRole = (req.user.role || 'PATIENT').toUpperCase();
-    if (userRole === 'DOCTOR' || userRole === 'ADMIN') {
+    // Front-desk and clinical staff can open patient profiles (demographics only;
+    // records have their own gate).
+    if (req.user.permissions?.includes('patient:lookup')) {
       return next();
     }
 

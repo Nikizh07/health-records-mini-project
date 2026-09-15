@@ -9,7 +9,7 @@ const express = require('express');
 const router = express.Router();
 
 const authenticate = require('../middleware/authenticate');
-const requireRole = require('../middleware/requireRole');
+const requirePermission = require('../middleware/requirePermission');
 
 /**
  * @route   GET /api/protected
@@ -35,13 +35,13 @@ router.get('/', authenticate, (req, res) => {
 
 /**
  * @route   GET /api/protected/doctor-only
- * @desc    Test endpoint requiring DOCTOR or ADMIN role
- * @access  Private (DOCTOR, ADMIN)
+ * @desc    Test endpoint requiring the record:read permission (doctors)
+ * @access  Private (record:read)
  */
-router.get('/doctor-only', authenticate, requireRole('DOCTOR', 'ADMIN'), (req, res) => {
+router.get('/doctor-only', authenticate, requirePermission('record:read'), (req, res) => {
   res.json({
     success: true,
-    message: '👨‍⚕️ Access Granted! You are authorized as a DOCTOR or ADMIN.',
+    message: '👨‍⚕️ Access Granted! You hold the record:read permission.',
     timestamp: new Date().toISOString(),
     authenticated_user: {
       uid: req.user.uid,

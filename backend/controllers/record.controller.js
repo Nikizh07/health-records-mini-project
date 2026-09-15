@@ -126,56 +126,16 @@ async function createMedicalRecord(req, res, next) {
     } = body;
 
     // ── 1. Validate Doctor Identity ──────────────────────────
-    // A DOCTOR always saves under their own profile. Only an ADMIN may name
-    // the doctor (body doctor_id, or the appointment's doctor).
-    const userRole = (req.user?.role || '').toUpperCase();
-    let doctor_id = bodyDoctorId ? String(bodyDoctorId).trim() : null;
-
-    if (userRole === 'DOCTOR') {
-      const ownDoctorId = await getAuthenticatedDoctorId(req);
-      if (!ownDoctorId || (doctor_id && doctor_id !== ownDoctorId)) {
-        return res.status(403).json({
-          success: false,
-          error: 'Forbidden',
-          message: ownDoctorId
-            ? 'Doctors can only save visit records under their own profile.'
-            : 'No doctor profile is linked to this account.',
-        });
-      }
-      doctor_id = ownDoctorId;
-    }
-
-    if (!doctor_id && appointment_id && UUID_REGEX.test(String(appointment_id).trim())) {
-      const appt = await prisma.appointment.findUnique({
-        where: { id: String(appointment_id).trim() },
-        select: { doctor_id: true },
-      });
-      if (appt?.doctor_id) {
-        doctor_id = appt.doctor_id;
-      }
-    }
-
-    // No "first doctor in the table" fallback: a visit must be saved under the
-    // doctor who saw the patient. An ADMIN without a doctor profile passes doctor_id.
-
-    if (!doctor_id || !UUID_REGEX.test(doctor_id)) {
-      return res.status(400).json({
+    // record:write is DOCTOR only, and a doctor always saves under their own
+    // profile: a visit must be saved under the doctor who saw the patient.
+    const doctor_id = await getAuthenticatedDoctorId(req);
+    if (!doctor_id || (bodyDoctorId && String(bodyDoctorId).trim() !== doctor_id)) {
+      return res.status(403).json({
         success: false,
-        error: 'Bad Request',
-        message: 'Field "doctor_id" is required and must be a valid UUID.',
-      });
-    }
-
-    // Verify doctor exists
-    const doctorExists = await prisma.doctor.findUnique({
-      where: { id: doctor_id },
-    });
-
-    if (!doctorExists) {
-      return res.status(404).json({
-        success: false,
-        error: 'Not Found',
-        message: `Doctor with ID "${doctor_id}" does not exist.`,
+        error: 'Forbidden',
+        message: doctor_id
+          ? 'Doctors can only save visit records under their own profile.'
+          : 'No doctor profile is linked to this account.',
       });
     }
 
@@ -424,7 +384,7 @@ async function createMedicalRecord(req, res, next) {
  * ------------------------------------------------------------
  * Retrieves the complete longitudinal medical history for a patient.
  * - Core feature: Cross-clinic history follows the patient everywhere!
- * - Accessible by: The patient themselves, or ANY authenticated DOCTOR / ADMIN.
+ * - Accessible by: The patient themselves, or record:read (doctors).
  * - Supports lookup by Patient UUID or Health ID (e.g. MWH-XXXXXX).
  * ------------------------------------------------------------
  */
@@ -461,9 +421,8 @@ async function getPatientMedicalHistory(req, res, next) {
       });
     }
 
-    // ── 2. Authorization Check for PATIENT Role ──────────────
-    const userRole = (req.user?.role || 'PATIENT').toUpperCase();
-    if (userRole === 'PATIENT') {
+    // ── 2. Without record:read, only your own history ────────
+    if (!req.user.permissions.includes('record:read')) {
       // Patients can only view their own history
       const user = await prisma.user.findUnique({
         where: { firebase_uid: req.user.uid },
@@ -516,7 +475,7 @@ async function getPatientMedicalHistory(req, res, next) {
  * 3. GET /api/records/:id
  * ------------------------------------------------------------
  * Single medical record details by record UUID.
- * - Accessible by: The patient themselves, or any DOCTOR / ADMIN.
+ * - Accessible by: The patient themselves, or record:read (doctors).
  * ------------------------------------------------------------
  */
 async function getMedicalRecordById(req, res, next) {
@@ -545,8 +504,7 @@ async function getMedicalRecordById(req, res, next) {
     }
 
     // Authorization check for patients
-    const userRole = (req.user?.role || 'PATIENT').toUpperCase();
-    if (userRole === 'PATIENT') {
+    if (!req.user.permissions.includes('record:read')) {
       const user = await prisma.user.findUnique({
         where: { firebase_uid: req.user.uid },
         include: { patient: true },
@@ -578,7 +536,7 @@ async function getMedicalRecordById(req, res, next) {
  * Uploads a lab report / document for a specific medical record.
  * - File is uploaded via Multer (stored in uploads/reports)
  * - Updates report_file_url in PostgreSQL
- * - Accessible by DOCTOR and ADMIN roles.
+ * - Needs report:upload (doctors).
  * ------------------------------------------------------------
  */
 async function uploadReportFile(req, res, next) {

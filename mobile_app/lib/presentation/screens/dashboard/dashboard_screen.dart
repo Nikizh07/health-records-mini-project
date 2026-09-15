@@ -13,6 +13,14 @@ class DashboardScreen extends ConsumerWidget {
   static const Color _doctorColor = Color(0xFF006D77);
   static const Color _adminColor = Color(0xFF8338EC);
 
+  static const _staffActions = [
+    (Icons.calendar_today_outlined, "Today's Appointments", 'View queue and scheduled consultations', '/doctor/today-appointments'),
+    (Icons.post_add_outlined, 'Add Visit Record', 'Log diagnoses, prescriptions & lab results', '/doctor/add-record'),
+    (Icons.person_search_outlined, 'Patient Lookup', 'Search a patient and view their clinical history', '/doctor/patients'),
+    (Icons.medical_services_outlined, 'Manage Doctors', 'Onboard clinicians and assign specializations', '/admin/doctors'),
+    (Icons.apartment_outlined, 'Manage Clinics', 'Configure clinics, branches and schedules', '/admin/clinics'),
+  ];
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authNotifierProvider);
@@ -103,7 +111,7 @@ class DashboardScreen extends ConsumerWidget {
               style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
-            ..._buildRoleQuickActions(context, role, l10n),
+            ..._buildRoleQuickActions(context, role, l10n, authState.can),
             const SizedBox(height: 24),
             _buildInfoCard(role),
           ],
@@ -128,23 +136,16 @@ class DashboardScreen extends ConsumerWidget {
     BuildContext context,
     String role,
     AppLocalizations l10n,
+    bool Function(String) can,
   ) {
     final List<(IconData, String, String, String)> actions;
     final Color color;
 
-    if (role == 'DOCTOR') {
-      color = _doctorColor;
+    if (role != 'PATIENT') {
+      color = role == 'DOCTOR' ? _doctorColor : _adminColor;
       actions = [
-        (Icons.calendar_today_outlined, "Today's Appointments", 'View queue and scheduled consultations', '/doctor/today-appointments'),
-        (Icons.post_add_outlined, 'Add Visit Record', 'Log diagnoses, prescriptions & lab results', '/doctor/add-record'),
-        (Icons.person_search_outlined, 'Patient Lookup', 'Search a patient and view their clinical history', '/doctor/patients'),
-      ];
-    } else if (role == 'ADMIN') {
-      color = _adminColor;
-      actions = [
-        (Icons.medical_services_outlined, 'Manage Doctors', 'Onboard clinicians and assign specializations', '/admin/doctors'),
-        (Icons.apartment_outlined, 'Manage Clinics', 'Configure clinics, branches and schedules', '/admin/clinics'),
-        (Icons.person_search_outlined, 'Patient Lookup', 'Search patients and review their records', '/doctor/patients'),
+        for (final a in _staffActions)
+          if (ClinicShell.canAccess(a.$4, can)) a,
       ];
     } else {
       color = AppColors.primary;

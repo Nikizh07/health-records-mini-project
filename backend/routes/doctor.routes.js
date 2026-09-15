@@ -3,7 +3,7 @@
 // Doctor Module Router
 // ============================================================
 // All routes require a valid Firebase ID token (authenticate).
-// Write operations (POST / PUT) additionally require ADMIN role.
+// Write operations (POST / PUT) need staff:manage (own clinic for CLINIC_ADMIN).
 // ============================================================
 
 'use strict';
@@ -12,7 +12,7 @@ const express   = require('express');
 const router    = express.Router();
 
 const authenticate = require('../middleware/authenticate');
-const requireRole  = require('../middleware/requireRole');
+const requirePermission = require('../middleware/requirePermission');
 const doctorCtrl   = require('../controllers/doctor.controller');
 
 // Apply authentication to every doctor route
@@ -21,9 +21,9 @@ router.use(authenticate);
 /**
  * @route   POST /api/doctors
  * @desc    Create a new doctor linked to a clinic
- * @access  Private — ADMIN only
+ * @access  Private — staff:manage
  */
-router.post('/', requireRole('ADMIN'), doctorCtrl.createDoctor);
+router.post('/', requirePermission('staff:manage'), doctorCtrl.createDoctor);
 
 /**
  * @route   GET /api/doctors
@@ -43,8 +43,8 @@ router.get('/:id', doctorCtrl.getDoctorById);
 /**
  * @route   PUT /api/doctors/:id
  * @desc    Update doctor info (partial update supported)
- * @access  Private — ADMIN only
+ * @access  Private — staff:manage
  */
-router.put('/:id', requireRole('ADMIN'), doctorCtrl.updateDoctor);
+router.put('/:id', requirePermission('staff:manage'), doctorCtrl.updateDoctor);
 
 module.exports = router;

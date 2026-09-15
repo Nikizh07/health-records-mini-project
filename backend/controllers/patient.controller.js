@@ -10,6 +10,13 @@
 const prisma = require('../config/prisma');
 const { generateUniqueHealthId } = require('../utils/healthId');
 const { toE164 } = require('../utils/phone');
+const { permissionsFor } = require('../config/permissions');
+
+const STAFF_TITLES = {
+  ADMIN: 'System Administrator',
+  CLINIC_ADMIN: 'Clinic Administrator',
+  RECEPTIONIST: 'Receptionist',
+};
 
 /**
  * @route   POST /api/patients
@@ -124,7 +131,8 @@ async function createPatient(req, res, next) {
     return res.status(201).json({
       success: true,
       message: '🎉 Patient profile registered successfully!',
-      data: newPatient,
+      // Same access fields as GET /patients/me: the app keeps this as the profile.
+      data: { ...newPatient, permissions: permissionsFor(user.role, user.status), status: user.status, clinic: null },
     });
   } catch (error) {
     console.error('❌ Error creating patient:', error.message);
@@ -139,7 +147,7 @@ async function createPatient(req, res, next) {
  */
 async function getMyProfile(req, res, next) {
   try {
-    const include = { patient: true, doctor: { include: { clinic: true } } };
+    const include = { patient: true, clinic: true, doctor: { include: { clinic: true } } };
     let user = await prisma.user.findUnique({
       where: { firebase_uid: req.user.uid },
       include,
@@ -175,7 +183,31 @@ async function getMyProfile(req, res, next) {
       });
     }
 
-    // Role DOCTOR
+    // Every role gets its permissions, status and clinic, so the app gates by
+    // permission. Computed from this row: a just-linked doctor has no req.user role.
+    const access = {
+      permissions: permissionsFor(user.role, user.status),
+      status: user.status,
+      clinic: user.doctor?.clinic ?? user.clinic ?? null,
+    };
+    const userInfo = {
+      id: user.id,
+      firebase_uid: user.firebase_uid,
+      role: user.role,
+      phone: user.phone,
+    };
+
+    if (user.role === 'PATIENT') {
+      if (!user.patient) {
+        return res.status(404).json({
+          success: false,
+          error: 'Not Found',
+          message: 'Patient profile not registered yet for this account. Please register first via POST /api/patients.',
+        });
+      }
+      return res.json({ success: true, data: { ...user.patient, ...access, user: userInfo } });
+    }
+
     if (user.role === 'DOCTOR') {
       return res.json({
         success: true,
@@ -184,53 +216,16 @@ async function getMyProfile(req, res, next) {
             name: user.phone ? `Doctor (${user.phone})` : 'Medical Doctor',
             specialization: 'General Practitioner',
           }),
-          user: {
-            id: user.id,
-            firebase_uid: user.firebase_uid,
-            role: user.role,
-            phone: user.phone,
-          },
+          ...access,
+          user: userInfo,
         },
       });
     }
 
-    // Role ADMIN
-    if (user.role === 'ADMIN') {
-      return res.json({
-        success: true,
-        data: {
-          name: 'System Administrator',
-          role: 'ADMIN',
-          user: {
-            id: user.id,
-            firebase_uid: user.firebase_uid,
-            role: user.role,
-            phone: user.phone,
-          },
-        },
-      });
-    }
-
-    // Default: PATIENT
-    if (!user.patient) {
-      return res.status(404).json({
-        success: false,
-        error: 'Not Found',
-        message: 'Patient profile not registered yet for this account. Please register first via POST /api/patients.',
-      });
-    }
-
+    // ADMIN, CLINIC_ADMIN, RECEPTIONIST
     return res.json({
       success: true,
-      data: {
-        ...user.patient,
-        user: {
-          id: user.id,
-          firebase_uid: user.firebase_uid,
-          role: user.role,
-          phone: user.phone,
-        },
-      },
+      data: { name: STAFF_TITLES[user.role], role: user.role, ...access, user: userInfo },
     });
   } catch (error) {
     console.error('❌ Error fetching own profile:', error.message);
@@ -241,7 +236,7 @@ async function getMyProfile(req, res, next) {
 /**
  * @route   GET /api/patients/:id
  * @desc    Fetch single patient profile by ID
- * @access  Private (Self-Access or Doctor/Admin)
+ * @access  Private (Self-Access or patient:lookup)
  */
 async function getPatientById(req, res, next) {
   try {
@@ -299,7 +294,7 @@ async function getPatientById(req, res, next) {
 /**
  * @route   PUT /api/patients/:id
  * @desc    Update allowed profile fields for a patient (name, dob, gender, language_pref)
- * @access  Private (Self-Access or Doctor/Admin)
+ * @access  Private (Self-Access or patient:lookup)
  */
 async function updatePatient(req, res, next) {
   try {
@@ -373,7 +368,7 @@ async function updatePatient(req, res, next) {
 /**
  * @route   GET /api/patients/search?q=<query>
  * @desc    Search patients by name or Health ID (partial, case-insensitive)
- * @access  Private — DOCTOR and ADMIN only
+ * @access  Private — patient:lookup
  */
 async function searchPatients(req, res, next) {
   try {

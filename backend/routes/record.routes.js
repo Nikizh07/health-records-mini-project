@@ -9,7 +9,7 @@ const express = require('express');
 const router = express.Router();
 
 const authenticate = require('../middleware/authenticate');
-const requireRole = require('../middleware/requireRole');
+const requirePermission = require('../middleware/requirePermission');
 const upload = require('../middleware/upload');
 const recordCtrl = require('../controllers/record.controller');
 
@@ -19,46 +19,46 @@ router.use(authenticate);
 /**
  * @route   POST /api/records
  * @desc    Create a new medical record with nested prescriptions
- * @access  Private — DOCTOR and ADMIN only
+ * @access  Private — record:write
  */
-router.post('/', requireRole('DOCTOR', 'ADMIN'), recordCtrl.createMedicalRecord);
+router.post('/', requirePermission('record:write'), recordCtrl.createMedicalRecord);
 
 /**
  * @route   POST /api/records/interaction-check
  * @desc    Pre-flight cross-clinic drug interaction check for pending prescriptions
- * @access  Private — DOCTOR and ADMIN only
+ * @access  Private — interaction:check
  * @note    Declared before the '/:id' routes so the literal path is not
  *          swallowed by the wildcard, matching the convention in
  *          patient.routes.js and appointment.routes.js.
  */
 router.post(
   '/interaction-check',
-  requireRole('DOCTOR', 'ADMIN'),
+  requirePermission('interaction:check'),
   recordCtrl.checkDrugInteractions
 );
 
 /**
  * @route   GET /api/records/patient/:patientId
  * @desc    Get longitudinal medical history for a patient (cross-clinic)
- * @access  Private — Patient (Self) or DOCTOR / ADMIN
+ * @access  Private — self:profile (own) or record:read
  */
-router.get('/patient/:patientId', recordCtrl.getPatientMedicalHistory);
+router.get('/patient/:patientId', requirePermission('self:profile', 'record:read'), recordCtrl.getPatientMedicalHistory);
 
 /**
  * @route   GET /api/records/:id
  * @desc    Get details of a single medical record
- * @access  Private — Patient (Self) or DOCTOR / ADMIN
+ * @access  Private — self:profile (own) or record:read
  */
-router.get('/:id', recordCtrl.getMedicalRecordById);
+router.get('/:id', requirePermission('self:profile', 'record:read'), recordCtrl.getMedicalRecordById);
 
 /**
  * @route   POST /api/records/:id/upload
  * @desc    Upload a lab report or document to a medical record
- * @access  Private — DOCTOR and ADMIN only
+ * @access  Private — report:upload
  */
 router.post(
   '/:id/upload',
-  requireRole('DOCTOR', 'ADMIN'),
+  requirePermission('report:upload'),
   upload.single('report'),
   recordCtrl.uploadReportFile
 );

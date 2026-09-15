@@ -47,6 +47,11 @@ class AuthState {
       .toString()
       .toUpperCase();
 
+  /// Permissions from the backend's table (backend/config/permissions.js),
+  /// sent in /patients/me. Empty for PENDING or DISABLED accounts.
+  bool can(String permission) =>
+      (patientProfile?['permissions'] as List?)?.contains(permission) ?? false;
+
   AuthState copyWith({
     AuthStatus? status,
     String? phoneNumber,
