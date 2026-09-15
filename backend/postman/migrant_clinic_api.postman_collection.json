@@ -331,6 +331,7 @@
       "item": [
         {
           "name": "1. Create Doctor (Admin Only)",
+          "description": "Since Auth Phase 3 this is an alias: it creates a DOCTOR invite plus the unlinked Doctor row (returned as data, with data.invite). The doctor is linked on first phone sign-in.",
           "event": [
             {
               "listen": "test",
@@ -1182,6 +1183,233 @@
               "host": ["{{base_url}}"],
               "path": ["api", "records", "{{record_id}}", "upload"]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "06. Staff Onboarding",
+      "item": [
+        {
+          "name": "1. Invite Staff (staff:manage)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/staff/invites",
+              "host": ["{{base_url}}"],
+              "path": ["api", "staff", "invites"]
+            },
+            "description": "role: RECEPTIONIST | DOCTOR | CLINIC_ADMIN. Needs email and/or phone; DOCTOR needs specialization. Accepted on the invitee's first GET /patients/me with that verified email/phone. Expires in 14 days.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"RECEPTIONIST\",\n  \"email\": \"desk@example.com\",\n  \"name\": \"Front Desk\",\n  \"clinic_id\": \"{{clinic_id}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "2. List Invites (staff:manage)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/staff/invites",
+              "host": ["{{base_url}}"],
+              "path": ["api", "staff", "invites"]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "3. Apply as Doctor (verified email, no account)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{applicant_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/staff/applications",
+              "host": ["{{base_url}}"],
+              "path": ["api", "staff", "applications"]
+            },
+            "description": "Creates a DOCTOR user with status PENDING (no permissions, hidden from booking) until approved.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dr. New Applicant\",\n  \"specialization\": \"General Practice\",\n  \"registration_number\": \"MMC-12345\",\n  \"registration_council\": \"Malaysian Medical Council\",\n  \"clinic_id\": \"{{clinic_id}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set(\"staff_user_id\", json.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. List Staff (staff:manage)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/staff?status=PENDING",
+              "host": ["{{base_url}}"],
+              "path": ["api", "staff"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "PENDING"
+                }
+              ]
+            },
+            "description": "status: ACTIVE | PENDING | DISABLED (optional)."
+          }
+        },
+        {
+          "name": "5. Approve Staff",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/staff/{{staff_user_id}}/approve",
+              "host": ["{{base_url}}"],
+              "path": ["api", "staff", "{{staff_user_id}}", "approve"]
+            },
+            "description": "PENDING or DISABLED → ACTIVE."
+          }
+        },
+        {
+          "name": "6. Reject Application",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/staff/{{staff_user_id}}/reject",
+              "host": ["{{base_url}}"],
+              "path": ["api", "staff", "{{staff_user_id}}", "reject"]
+            },
+            "description": "PENDING only; removes the account."
+          }
+        },
+        {
+          "name": "7. Disable Staff",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/staff/{{staff_user_id}}/disable",
+              "host": ["{{base_url}}"],
+              "path": ["api", "staff", "{{staff_user_id}}", "disable"]
+            },
+            "description": "→ DISABLED: 403 on every call."
           }
         }
       ]

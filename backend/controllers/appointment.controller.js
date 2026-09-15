@@ -194,10 +194,11 @@ async function bookAppointment(req, res, next) {
     // ── 3. Validate Doctor & Clinic Existence ────────────────
     const doctor = await prisma.doctor.findUnique({
       where: { id: doctor_id },
-      include: { clinic: true },
+      include: { clinic: true, user: { select: { status: true } } },
     });
 
-    if (!doctor) {
+    // A pending or disabled doctor is hidden from booking; refuse a guessed id too.
+    if (!doctor || (doctor.user && doctor.user.status !== 'ACTIVE')) {
       return res.status(404).json({
         success: false,
         error: 'Not Found',

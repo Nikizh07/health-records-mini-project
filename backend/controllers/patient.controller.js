@@ -11,6 +11,7 @@ const prisma = require('../config/prisma');
 const { generateUniqueHealthId } = require('../utils/healthId');
 const { toE164 } = require('../utils/phone');
 const { permissionsFor } = require('../config/permissions');
+const { acceptInvite } = require('./staff.controller');
 
 const STAFF_TITLES = {
   ADMIN: 'System Administrator',
@@ -141,6 +142,16 @@ async function createPatient(req, res, next) {
 }
 
 /**
+ * Where an account without a profile goes next: phone (or debug guest) sign-ins
+ * register as patients; email sign-ins verify their email, then apply as staff.
+ */
+function nextStep(authUser) {
+  if (authUser.phone_number || authUser.sign_in_provider === 'anonymous') return 'REGISTER';
+  if (!authUser.email_verified) return 'VERIFY_EMAIL';
+  return 'STAFF_APPLY';
+}
+
+/**
  * @route   GET /api/patients/me
  * @desc    Fetch profile of currently authenticated patient
  * @access  Private (Self)
@@ -153,33 +164,19 @@ async function getMyProfile(req, res, next) {
       include,
     });
 
-    // First sign-in of a doctor onboarded by an admin: the Doctor row exists
-    // (matched by phone) but has no login yet. Link it instead of sending
-    // them to patient registration. Exact E.164 match on the token's verified
-    // phone only: a partial match could hand a doctor account to a stranger.
-    const phone = toE164(req.user.phone_number);
-    if (!user && phone) {
-      const doctor = await prisma.doctor.findFirst({
-        where: { user_id: null, phone },
-      });
-      if (doctor) {
-        user = await prisma.user.create({
-          data: {
-            firebase_uid: req.user.uid,
-            phone,
-            role: 'DOCTOR',
-            doctor: { connect: { id: doctor.id } },
-          },
-          include,
-        });
-      }
+    // First sign-in of invited staff: accept a matching invite (verified
+    // email or phone only). This is the only way a staff account is linked.
+    if (!user) {
+      user = await acceptInvite(req, include);
     }
 
+    // `next` tells the app where to send an account with no profile yet.
     if (!user) {
       return res.status(404).json({
         success: false,
         error: 'Not Found',
         message: 'User account not registered yet. Please register first.',
+        next: nextStep(req.user),
       });
     }
 
@@ -203,6 +200,7 @@ async function getMyProfile(req, res, next) {
           success: false,
           error: 'Not Found',
           message: 'Patient profile not registered yet for this account. Please register first via POST /api/patients.',
+          next: 'REGISTER',
         });
       }
       return res.json({ success: true, data: { ...user.patient, ...access, user: userInfo } });

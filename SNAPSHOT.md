@@ -8,7 +8,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-2 done
+├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-3 done
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
@@ -47,10 +47,13 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── health.routes.js, protected.routes.js
 │   │   ├── patient.routes.js, doctor.routes.js, clinic.routes.js
 │   │   ├── appointment.routes.js
+│   │   ├── staff.routes.js        # /staff: invites, doctor applications, list, approve/reject/disable
 │   │   └── record.routes.js       # records, POST /interaction-check, POST /:id/upload (multer)
 │   ├── controllers/
 │   │   ├── health.controller.js, patient.controller.js, doctor.controller.js
 │   │   ├── clinic.controller.js, appointment.controller.js
+│   │   ├── staff.controller.js    # buildInvite (shared with POST /doctors), acceptInvite (used by /patients/me),
+│   │   │                          # applications, staff list, approve/reject/disable
 │   │   └── record.controller.js   # medical records, prescriptions, report upload,
 │   │                              # POST /interaction-check (drug conflict pre-flight), and
 │   │                              # createMedicalRecord's check_id / override_reason audit wiring
@@ -72,7 +75,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── schema.prisma          # + DrugInteraction, InteractionCheck, InteractionSeverity
 │   │   └── migrations/            # 20260810170839_init_schema, 20260910082706,
 │   │                              # 20260912122022_add_drug_interactions, 20260912122039_add_history_indexes,
-│   │                              # 20260915000000_add_roles_status
+│   │                              # 20260915000000_add_roles_status, 20260915120000_add_staff_onboarding
 │   ├── utils/
 │   │   ├── healthId.js            # MWH-XXXXXX health ID generator
 │   │   ├── phone.js               # toE164(): every stored/matched phone goes through it (+91 default)
@@ -86,7 +89,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── test-auth-rbac.js      # auth/RBAC regression suite (AUTH_RBAC_CONSENT_PLAN.md), one section per phase;
 │   │   │                          # same stubbed-Firebase harness as test-interactions.js
 │   │   └── test-ai-provider.js    # smoke-tests whichever AI provider .env configures (no DB)
-│   ├── postman/                   # API collection + environment
+│   ├── postman/                   # API collection + environment (06. Staff Onboarding since Auth Phase 3)
 │   ├── models/README.md
 │   └── uploads/reports/           # local uploaded reports (1 test PDF)
 │

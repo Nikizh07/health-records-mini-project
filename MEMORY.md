@@ -35,7 +35,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - ~~Known gap: same-visit pairs don't fire~~ — closed 2026-09-12.
 
 ## Planned: registration, RBAC and patient consent
-- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-2 done (2026-09-15); next is Phase 3 (or 5/7, which only need Phase 2).**
+- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-3 done (2026-09-15); next is Phase 4 (staff sign-in UI), or 5/7.**
 - Split into 8 phases, one migration per phase (2026-09-13):
   1. identity hardening
   2. roles + permission table
@@ -69,6 +69,18 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-15: Auth/RBAC Phase 3 — staff onboarding API.**
+  - Migration `20260915120000_add_staff_onboarding`: new `staff_invites`; `doctors` += `registration_number`, `registration_council`, `verified_at`, `verified_by_id`. `invited_by_id` is nullable because the data SQL inserts an invite for every unlinked doctor with no inviter. **Those legacy invites last 90 days, not 14**, so no pre-created doctor is stranded. Locally that was 4 seeded doctors (Sarah Tan, Rajiv Menon, Li Wei, Ananya Sharma).
+  - New `routes/staff.routes.js` + `controllers/staff.controller.js`: `POST/GET /staff/invites`, `POST /staff/applications`, `GET /staff?status=`, `POST /staff/:userId/approve|reject|disable`.
+  - **Invites are the only way a staff account gets linked.** `/patients/me` runs `acceptInvite` when there is no users row: it takes the newest open invite matching the token phone or a **verified** email, creates the user with the invite role and clinic, and for a DOCTOR links an unlinked Doctor with the same phone/email (keeping its appointments) or creates one. The old phone linking is gone.
+  - A 404 from `/patients/me` now carries `next`: `REGISTER` (phone/guest sign-in, or PATIENT without a patient row), `VERIFY_EMAIL` (email not verified; not in the plan, but applying and accepting both need it), `STAFF_APPLY` (verified email).
+  - Invite rules: roles RECEPTIONIST/DOCTOR/CLINIC_ADMIN only (ADMIN stays the script). An identifier that already has a users row, or already has an open invite, gets 409. A CLINIC_ADMIN invite defaults to, and is limited to, their own clinic.
+  - **`POST /doctors` creates the invite AND the unlinked Doctor row**, returning the doctor with `data.invite`. The plan said invite only, but the Postman collection saves `data.id` as `doctor_id` for later requests and the admin screen lists doctors, so both keep working.
+  - Decisions: **reject deletes the pending user and Doctor row** (nothing to keep, since pending doctors can't be booked), so they can apply again. **Approve also re-enables a DISABLED account.** It sets `verified_at`/`verified_by_id` only on the first approval. Nobody can act on their own account; a CLINIC_ADMIN can't touch platform ADMINs or other clinics.
+  - Pending/disabled doctors are hidden from `GET /doctors`, and `bookAppointment` also refuses them by id. Unlinked doctors (no user yet) stay bookable, as before.
+  - Postman: new folder `06. Staff Onboarding`, env vars `applicant_token` and `staff_user_id`.
+  - Tests: `test-auth-rbac.js` 177/177; mutation-checked (accepting an unverified email fails 2 tests). `test-interactions.js` 112/112; `flutter test` green.
+  - Known gap: an invite for someone who already has an account (e.g. a patient) is refused with 409. There is no role change for existing accounts yet.
 - **2026-09-15: Auth/RBAC Phase 2 — roles and permission table.**
   - Migration `20260915000000_add_roles_status`: `Role` += `RECEPTIONIST`, `CLINIC_ADMIN`; new `UserStatus` (ACTIVE/PENDING/DISABLED); `users.phone` nullable, new `users.email` (unique), `users.status`, `users.clinic_id`; `doctors.phone` nullable, new `doctors.email` (unique). Generated with `prisma migrate diff` because `migrate dev` refuses a non-interactive shell.
   - `config/permissions.js` is the §B table. `permissionsFor(role, status)` is empty unless ACTIVE. `outsideOwnClinic(user, clinicId)` is the shared clinic-scope check (ADMIN is exempt).

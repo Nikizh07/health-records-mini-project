@@ -1,6 +1,6 @@
 # Plan: Registration, RBAC and patient consent
 
-**Status (2026-09-15): Phases 1–2 done. Phases 3–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
+**Status (2026-09-15): Phases 1–3 done. Phases 4–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
 
 ## Context
 
@@ -192,7 +192,7 @@ Every allowed read of patient data writes a `PatientAccessLog` row.
 
 **Done when:** the matrix passes, `flutter test` is green, and the doctor and admin portals still open with the right nav.
 
-## Phase 3: Staff onboarding API
+## Phase 3: Staff onboarding API ✅ done 2026-09-15
 
 **Goal:** doctors and staff can be invited or apply, and admins can approve, reject and disable. API only.
 

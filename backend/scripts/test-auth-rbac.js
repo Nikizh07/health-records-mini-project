@@ -8,6 +8,7 @@
 // production.
 // Phase 2: roles + permission table — a role × endpoint matrix generated from
 // config/permissions.js, account status, clinic scope.
+// Phase 3: staff onboarding — invites, doctor applications, approve/reject/disable.
 //
 // Same harness as scripts/test-interactions.js: Firebase is stubbed in
 // require.cache before the app loads and the real Express app is driven over
@@ -133,6 +134,11 @@ async function main() {
   const DOC_A_PHONE = `+6012${N}`;
   const doctorA = await prisma.doctor.create({
     data: { clinic_id: clinic.id, name: `${TAG} Dr A`, specialization: 'GP', phone: DOC_A_PHONE },
+  });
+  const IN_14_DAYS = new Date(Date.now() + 14 * 864e5);
+  // Since Phase 3 an unlinked doctor is linked only through an invite.
+  await prisma.staffInvite.create({
+    data: { clinic_id: clinic.id, role: 'DOCTOR', phone: DOC_A_PHONE, name: `${TAG} Dr A`, specialization: 'GP', expires_at: IN_14_DAYS },
   });
   const doctorB = await prisma.doctor.create({
     data: { clinic_id: clinic.id, name: `${TAG} Dr B`, specialization: 'GP', phone: `+6014${N}` },
@@ -391,6 +397,150 @@ async function main() {
   ok('ADMIN no longer manages appointments', r.status === 403, detail(r));
   r = await api('PATCH', `/appointments/${otherAppt.id}/cancel`, { token: AS.PATIENT });
   ok('the patient cancels their own appointment', r.status === 200, detail(r));
+
+  // ═══════════════════════════════════════════════════════════
+  // Phase 3: staff onboarding
+  // ═══════════════════════════════════════════════════════════
+  const emailToken = (uid, email, verified = true) =>
+    token({ uid, provider: 'password', email, emailVerified: verified });
+  const mail = (name) => `${name}-${TAG}@example.com`;
+  const cadmin2 = await prisma.user.create({ data: { firebase_uid: `${TAG}-p3cadmin2`, email: mail('cadmin2'), role: 'CLINIC_ADMIN', clinic_id: clinic2.id } });
+  const CADMIN2 = token({ uid: 'p3cadmin2', provider: 'password' });
+
+  section('Phase 3 · /patients/me tells a new account where to go');
+  r = await api('GET', '/patients/me', { token: token({ uid: 'p3newphone', phone: `+9192${N}` }) });
+  ok('a phone sign-in with no profile → next REGISTER', r.status === 404 && r.body?.next === 'REGISTER', detail(r));
+  r = await api('GET', '/patients/me', { token: emailToken('p3unverified', mail('unverified'), false) });
+  ok('an unverified email sign-in → next VERIFY_EMAIL', r.status === 404 && r.body?.next === 'VERIFY_EMAIL', detail(r));
+  r = await api('GET', '/patients/me', { token: emailToken('p3newmail', mail('newmail')) });
+  ok('a verified email sign-in with no invite → next STAFF_APPLY', r.status === 404 && r.body?.next === 'STAFF_APPLY', detail(r));
+
+  section('Phase 3 · invites');
+  r = await api('POST', '/staff/invites', { token: ADMIN, body: { role: 'RECEPTIONIST', email: mail('Desk').toUpperCase(), name: 'Front Desk', clinic_id: clinic.id } });
+  ok('ADMIN invites a receptionist by email', r.status === 201 && r.body?.data?.email === mail('desk'), detail(r));
+  r = await api('POST', '/staff/invites', { token: ADMIN, body: { role: 'RECEPTIONIST', email: mail('desk'), name: 'Front Desk', clinic_id: clinic.id } });
+  ok('a second open invite for the same email → 409', r.status === 409, detail(r));
+  r = await api('POST', '/staff/invites', { token: ADMIN, body: { role: 'ADMIN', email: mail('boss'), name: 'Boss', clinic_id: clinic.id } });
+  ok('ADMIN cannot be invited (bootstrap stays a script)', r.status === 400, detail(r));
+  r = await api('POST', '/staff/invites', { token: ADMIN, body: { role: 'RECEPTIONIST', email: mail('recep'), name: 'Taken', clinic_id: clinic.id } });
+  ok('an email that already has an account → 409', r.status === 409, detail(r));
+  r = await api('POST', '/staff/invites', { token: AS.CLINIC_ADMIN, body: { role: 'RECEPTIONIST', email: mail('elsewhere'), name: 'Elsewhere', clinic_id: clinic2.id } });
+  ok("a CLINIC_ADMIN cannot invite to another clinic", r.status === 403, detail(r));
+  r = await api('POST', '/staff/invites', { token: AS.CLINIC_ADMIN, body: { role: 'DOCTOR', email: mail('newdoc'), name: 'New Doc', specialization: 'GP' } });
+  ok('a CLINIC_ADMIN invite defaults to their own clinic', r.status === 201 && r.body?.data?.clinic_id === clinic.id, detail(r));
+
+  r = await api('GET', '/patients/me', { token: emailToken('p3desk', mail('desk'), false) });
+  ok('the invite is NOT accepted with an unverified email', r.status === 404, detail(r));
+  ok('…and no account is created', (await prisma.user.count({ where: { firebase_uid: `${TAG}-p3desk` } })) === 0);
+  const DESK = emailToken('p3desk', mail('desk'));
+  r = await api('GET', '/patients/me', { token: DESK });
+  ok('the invite IS accepted with the verified email', r.status === 200 && r.body?.data?.user?.role === 'RECEPTIONIST', detail(r));
+  ok('…with the invite clinic and receptionist permissions',
+    r.body?.data?.clinic?.id === clinic.id && JSON.stringify(r.body?.data?.permissions) === JSON.stringify(PERMISSIONS.RECEPTIONIST), detail(r));
+  const deskUser = await prisma.user.findUnique({ where: { firebase_uid: `${TAG}-p3desk` } });
+  ok('…and the invite is marked accepted',
+    (await prisma.staffInvite.findFirst({ where: { email: mail('desk') } }))?.accepted_user_id === deskUser?.id);
+
+  r = await api('GET', '/patients/me', { token: emailToken('p3newdoc', mail('newdoc')) });
+  ok('a doctor invite with no existing Doctor row creates one', r.status === 200 && r.body?.data?.user?.role === 'DOCTOR' && r.body?.data?.specialization === 'GP', detail(r));
+
+  await prisma.staffInvite.create({
+    data: { clinic_id: clinic.id, role: 'RECEPTIONIST', email: mail('late'), name: 'Late', expires_at: new Date(Date.now() - 1000) },
+  });
+  r = await api('GET', '/patients/me', { token: emailToken('p3late', mail('late')) });
+  ok('an expired invite is ignored', r.status === 404 && r.body?.next === 'STAFF_APPLY', detail(r));
+
+  const LEGACY_PHONE = `+6017${N}`;
+  const legacy = await prisma.doctor.create({
+    data: { clinic_id: clinic.id, name: `${TAG} Dr Legacy`, specialization: 'GP', phone: LEGACY_PHONE },
+  });
+  await prisma.appointment.create({ data: { patient_id: patient2.id, doctor_id: legacy.id, clinic_id: clinic.id, slot_time: new Date() } });
+  // What the migration inserts for every unlinked doctor.
+  await prisma.staffInvite.create({
+    data: { clinic_id: clinic.id, role: 'DOCTOR', phone: LEGACY_PHONE, name: legacy.name, specialization: 'GP', expires_at: IN_14_DAYS },
+  });
+  const LEGACY = token({ uid: 'p3legacy', phone: LEGACY_PHONE });
+  r = await api('GET', '/patients/me', { token: LEGACY });
+  ok('a legacy unlinked doctor is linked (same Doctor row)', r.status === 200 && r.body?.data?.id === legacy.id, detail(r));
+  r = await api('GET', '/appointments', { token: LEGACY });
+  ok('…with its appointments intact', r.status === 200 && r.body?.data?.length === 1 && r.body.data[0].doctor_id === legacy.id, detail(r));
+
+  r = await api('GET', '/staff/invites', { token: AS.CLINIC_ADMIN });
+  ok("a CLINIC_ADMIN lists only their clinic's invites, with a state",
+    r.status === 200 && r.body.data.length > 0 && r.body.data.every((i) => i.clinic_id === clinic.id && i.state), detail(r));
+
+  section('Phase 3 · POST /doctors is an invite alias');
+  const ALIAS_PHONE = `+6018${N}`;
+  r = await api('POST', '/doctors', { token: ADMIN, body: { name: `${TAG} Dr Alias`, clinic_id: clinic.id, specialization: 'GP', phone: ALIAS_PHONE } });
+  const aliasDoctorId = r.body?.data?.id;
+  ok('it returns 201 with the doctor (data.id is a Doctor id)', r.status === 201 && !!(await prisma.doctor.findUnique({ where: { id: aliasDoctorId || '00000000-0000-0000-0000-000000000000' } })), detail(r));
+  ok('…and an invite', r.body?.data?.invite?.phone === ALIAS_PHONE && r.body?.data?.invite?.role === 'DOCTOR', detail(r));
+  r = await api('GET', '/patients/me', { token: token({ uid: 'p3alias', phone: ALIAS_PHONE }) });
+  ok('the doctor signs in and is linked to that row', r.status === 200 && r.body?.data?.id === aliasDoctorId, detail(r));
+
+  section('Phase 3 · doctor applications');
+  const APPLICATION = { name: `${TAG} Dr Applicant`, specialization: 'GP', registration_number: 'MMC-12345', registration_council: 'Malaysian Medical Council', clinic_id: clinic.id };
+  r = await api('POST', '/staff/applications', { token: emailToken('p3unverified', mail('unverified'), false), body: APPLICATION });
+  ok('an unverified email cannot apply', r.status === 403, detail(r));
+  r = await api('POST', '/staff/applications', { token: AS.PATIENT, body: APPLICATION });
+  ok('an existing account cannot apply', r.status === 409, detail(r));
+  r = await api('POST', '/staff/applications', { token: emailToken('p3applicant', mail('applicant')), body: { ...APPLICATION, registration_number: '' } });
+  ok('a registration number is required', r.status === 400, detail(r));
+
+  const APPLICANT = emailToken('p3applicant', mail('applicant'));
+  r = await api('POST', '/staff/applications', { token: APPLICANT, body: APPLICATION });
+  ok('a verified email applies → DOCTOR PENDING', r.status === 201 && r.body?.data?.role === 'DOCTOR' && r.body?.data?.status === 'PENDING', detail(r));
+  const applicantId = r.body?.data?.id;
+  const applicantDoctorId = r.body?.data?.doctor?.id;
+  r = await api('GET', '/patients/me', { token: APPLICANT });
+  ok('a pending doctor has no permissions', r.status === 200 && r.body?.data?.status === 'PENDING' && r.body?.data?.permissions?.length === 0, detail(r));
+  r = await api('GET', `/doctors?clinic_id=${clinic.id}`, { token: AS.PATIENT });
+  ok('…is hidden from booking', r.status === 200 && !r.body.data.some((d) => d.id === applicantDoctorId), detail(r));
+  r = await api('POST', '/appointments', { token: AS.PATIENT, body: { doctor_id: applicantDoctorId, clinic_id: clinic.id, slot_time: new Date(Date.now() + 864e5).toISOString() } });
+  ok('…and cannot be booked by id', r.status === 404, detail(r));
+
+  r = await api('GET', '/staff?status=PENDING', { token: AS.CLINIC_ADMIN });
+  ok('the clinic admin sees the pending application with its registration number',
+    r.status === 200 && r.body.data.some((u) => u.id === applicantId && u.doctor?.registration_number === 'MMC-12345'), detail(r));
+  r = await api('GET', '/staff?status=PENDING', { token: CADMIN2 });
+  ok("another clinic's admin does not see it", r.status === 200 && !r.body.data.some((u) => u.id === applicantId), detail(r));
+  r = await api('POST', `/staff/${applicantId}/approve`, { token: CADMIN2 });
+  ok("a CLINIC_ADMIN cannot approve another clinic's applicant", r.status === 403, detail(r));
+  r = await api('POST', `/staff/${applicantId}/approve`, { token: AS.CLINIC_ADMIN });
+  ok('the own clinic admin approves → ACTIVE', r.status === 200 && r.body?.data?.status === 'ACTIVE', detail(r));
+  const verified = await prisma.doctor.findUnique({ where: { id: applicantDoctorId } });
+  const cadminUser = await prisma.user.findUnique({ where: { firebase_uid: `${TAG}-p2cadmin` } });
+  ok('…recording who verified the doctor and when', !!verified.verified_at && verified.verified_by_id === cadminUser.id);
+  r = await api('GET', '/patients/me', { token: APPLICANT });
+  ok('…the doctor now has doctor permissions', JSON.stringify(r.body?.data?.permissions) === JSON.stringify(PERMISSIONS.DOCTOR), detail(r));
+  r = await api('GET', `/doctors?clinic_id=${clinic.id}`, { token: AS.PATIENT });
+  ok('…and is bookable', r.body.data.some((d) => d.id === applicantDoctorId), detail(r));
+
+  const REJECTED = emailToken('p3rejected', mail('rejected'));
+  r = await api('POST', '/staff/applications', { token: REJECTED, body: { ...APPLICATION, name: `${TAG} Dr Rejected` } });
+  r = await api('POST', `/staff/${r.body?.data?.id}/reject`, { token: AS.CLINIC_ADMIN });
+  ok('a pending application can be rejected', r.status === 200, detail(r));
+  r = await api('GET', '/patients/me', { token: REJECTED });
+  ok('…which removes the account, so they may apply again', r.status === 404 && r.body?.next === 'STAFF_APPLY', detail(r));
+  r = await api('POST', `/staff/${applicantId}/reject`, { token: AS.CLINIC_ADMIN });
+  ok('an ACTIVE doctor cannot be "rejected"', r.status === 400, detail(r));
+
+  section('Phase 3 · disable');
+  r = await api('POST', `/staff/${cadminUser.id}/disable`, { token: AS.CLINIC_ADMIN });
+  ok('you cannot disable yourself', r.status === 400, detail(r));
+  r = await api('POST', `/staff/${cadmin2.id}/disable`, { token: AS.CLINIC_ADMIN });
+  ok("a CLINIC_ADMIN cannot disable another clinic's staff", r.status === 403, detail(r));
+  const adminUser = await prisma.user.findUnique({ where: { firebase_uid: `${TAG}-admin` } });
+  r = await api('POST', `/staff/${adminUser.id}/disable`, { token: AS.CLINIC_ADMIN });
+  ok('a CLINIC_ADMIN cannot disable a platform ADMIN', r.status === 403, detail(r));
+  r = await api('POST', `/staff/${patientUser.id}/disable`, { token: ADMIN });
+  ok('patients are not staff (404)', r.status === 404, detail(r));
+  r = await api('POST', `/staff/${deskUser.id}/disable`, { token: AS.CLINIC_ADMIN });
+  ok('the clinic admin disables their receptionist', r.status === 200 && r.body?.data?.status === 'DISABLED', detail(r));
+  r = await api('GET', '/appointments', { token: DESK });
+  ok('…who now gets 403 on every call', r.status === 403 && /disabled/.test(r.body?.message), detail(r));
+  r = await api('POST', `/staff/${deskUser.id}/approve`, { token: AS.CLINIC_ADMIN });
+  ok('approve re-enables a disabled account', r.status === 200 && r.body?.data?.status === 'ACTIVE', detail(r));
 
   // ───────────────────────────────────────────────────────────
   section('A database failure is a 500, not a logout');

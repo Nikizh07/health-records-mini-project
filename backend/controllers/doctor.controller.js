@@ -15,7 +15,9 @@
 
 const prisma = require('../config/prisma');
 const { toE164 } = require('../utils/phone');
+const { STATUS_CODES } = require('http');
 const { outsideOwnClinic } = require('../config/permissions');
+const { buildInvite } = require('./staff.controller');
 
 // Reusable UUID format validator
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -30,41 +32,17 @@ const DOCTOR_INCLUDE = {
 
 /**
  * @route   POST /api/doctors
- * @desc    Register a new doctor linked to an existing clinic
+ * @desc    Thin alias kept for the admin screen and the Postman collection:
+ *          creates a DOCTOR invite plus the unlinked Doctor row that the
+ *          invite links on the doctor's first sign-in (see staff.controller).
  * @access  Private — staff:manage (own clinic for CLINIC_ADMIN)
  */
 async function createDoctor(req, res, next) {
   try {
-    const { name, clinic_id, specialization, phone } = req.body;
+    const { name, clinic_id, specialization, phone, email } = req.body;
 
-    // ── Input Validation ─────────────────────────────────────
-    if (!name || typeof name !== 'string' || name.trim().length < 2) {
-      return res.status(400).json({
-        success: false,
-        error: 'Bad Request',
-        message: 'Field "name" is required and must be at least 2 characters.',
-      });
-    }
-
-    if (!clinic_id || !UUID_REGEX.test(clinic_id)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Bad Request',
-        message: 'Field "clinic_id" is required and must be a valid UUID.',
-      });
-    }
-
-    if (!specialization || typeof specialization !== 'string' || specialization.trim().length < 2) {
-      return res.status(400).json({
-        success: false,
-        error: 'Bad Request',
-        message: 'Field "specialization" is required (e.g. "General Practice", "Dermatology").',
-      });
-    }
-
-    // Stored as E.164 so the doctor's first phone sign-in links to this row.
-    const e164Phone = toE164(phone);
-    if (!e164Phone) {
+    // A phone stays required here, as before; POST /staff/invites also takes email-only.
+    if (!toE164(phone)) {
       return res.status(400).json({
         success: false,
         error: 'Bad Request',
@@ -72,45 +50,33 @@ async function createDoctor(req, res, next) {
       });
     }
 
-    if (outsideOwnClinic(req.user, clinic_id)) {
-      return res.status(403).json({
-        success: false,
-        error: 'Forbidden',
-        message: 'You can only manage your own clinic.',
-      });
+    const { error, data } = await buildInvite(req, { role: 'DOCTOR', name, clinic_id, specialization, phone, email });
+    if (error) {
+      return res.status(error[0]).json({ success: false, error: STATUS_CODES[error[0]], message: error[1] });
     }
 
-    // ── Clinic Existence Check ────────────────────────────────
-    // We verify the referenced clinic exists BEFORE inserting.
-    // This gives a clean 404 instead of a raw DB foreign key error.
-    const clinic = await prisma.clinic.findUnique({ where: { id: clinic_id } });
-    if (!clinic) {
-      return res.status(404).json({
-        success: false,
-        error: 'Not Found',
-        message: `Clinic with ID "${clinic_id}" not found. Create the clinic first via POST /api/clinics.`,
-      });
-    }
-
-    // ── Database Insert ───────────────────────────────────────
-    const doctor = await prisma.doctor.create({
-      data: {
-        clinic_id,
-        name:           name.trim(),
-        specialization: specialization.trim(),
-        phone:          e164Phone,
-      },
-      include: DOCTOR_INCLUDE,
-    });
+    const [invite, doctor] = await prisma.$transaction([
+      prisma.staffInvite.create({ data }),
+      prisma.doctor.create({
+        data: {
+          clinic_id: data.clinic_id,
+          name: data.name,
+          specialization: data.specialization,
+          phone: data.phone,
+          email: data.email,
+        },
+        include: DOCTOR_INCLUDE,
+      }),
+    ]);
 
     return res.status(201).json({
       success: true,
-      message: '👨‍⚕️ Doctor registered successfully!',
-      data: doctor,
+      message: '👨‍⚕️ Doctor invited. They are linked when they first sign in with this phone.',
+      data: { ...doctor, invite },
     });
   } catch (error) {
     // Handle unique-phone constraint violation gracefully
-    if (error.code === 'P2002' && error.meta?.target?.includes('phone')) {
+    if (error.code === 'P2002') {
       return res.status(400).json({
         success: false,
         error: 'Conflict',
@@ -125,7 +91,7 @@ async function createDoctor(req, res, next) {
 /**
  * @route   GET /api/doctors
  * @route   GET /api/doctors?clinic_id=<uuid>
- * @desc    List all doctors. Optionally filter by clinic using ?clinic_id= query param.
+ * @desc    List bookable doctors. Optionally filter by clinic using ?clinic_id= query param.
  * @access  Private — Any authenticated user
  */
 async function getAllDoctors(req, res, next) {
@@ -135,7 +101,9 @@ async function getAllDoctors(req, res, next) {
     // Build where clause dynamically
     // If clinic_id is provided AND looks like a UUID, filter by it.
     // Otherwise, return all doctors (no where clause = no filter).
-    const where = {};
+    // Hide doctors whose account isn't ACTIVE (pending applications, disabled).
+    // Invited doctors who haven't signed in yet (no user) stay bookable.
+    const where = { OR: [{ user_id: null }, { user: { status: 'ACTIVE' } }] };
     if (clinic_id) {
       if (!UUID_REGEX.test(clinic_id)) {
         return res.status(400).json({

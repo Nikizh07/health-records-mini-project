@@ -58,6 +58,10 @@ model User {
   doctor  Doctor?
   clinic  Clinic?  @relation(fields: [clinic_id], references: [id], onDelete: SetNull)
 
+  invites_sent     StaffInvite[] @relation("InvitedBy")
+  invite_accepted  StaffInvite?  @relation("AcceptedBy")
+  doctors_verified Doctor[]      @relation("VerifiedBy")
+
   @@map("users")
 }
 
@@ -98,6 +102,7 @@ model Clinic {
   doctors      Doctor[]
   appointments Appointment[]
   users        User[]
+  staff_invites StaffInvite[]
 
   @@map("clinics")
 }
@@ -113,9 +118,15 @@ model Doctor {
   specialization String
   phone          String?  @unique
   email          String?  @unique
+  // Self-applied doctors: checked by hand against the council register.
+  registration_number  String?
+  registration_council String?
+  verified_at          DateTime?
+  verified_by_id       String?   @db.Uuid
   created_at     DateTime @default(now())
 
   user               User?              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  verified_by        User?              @relation("VerifiedBy", fields: [verified_by_id], references: [id], onDelete: SetNull)
   clinic             Clinic             @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
   appointments       Appointment[]
   medical_records    MedicalRecord[]
@@ -234,4 +245,33 @@ model InteractionCheck {
 
   @@index([patient_id])
   @@map("interaction_checks")
+}
+
+// ------------------------------------------------------------
+// 9. Staff Invite
+// ------------------------------------------------------------
+// An admin invites a person (by email and/or phone) to a role at a clinic.
+// Accepted on the invitee's first GET /patients/me, only when the matching
+// identifier is verified on their Firebase account.
+// ------------------------------------------------------------
+model StaffInvite {
+  id               String   @id @default(uuid()) @db.Uuid
+  clinic_id        String   @db.Uuid
+  role             Role
+  email            String?
+  phone            String?
+  name             String
+  specialization   String?
+  invited_by_id    String?  @db.Uuid // null for invites created by the migration for legacy doctors
+  accepted_user_id String?  @unique @db.Uuid
+  expires_at       DateTime
+  created_at       DateTime @default(now())
+
+  clinic        Clinic @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  invited_by    User?  @relation("InvitedBy", fields: [invited_by_id], references: [id], onDelete: SetNull)
+  accepted_user User?  @relation("AcceptedBy", fields: [accepted_user_id], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([phone])
+  @@map("staff_invites")
 }
