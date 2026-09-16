@@ -13,6 +13,7 @@ const { generateUniqueHealthId } = require('../utils/healthId');
 const { toE164 } = require('../utils/phone');
 const { permissionsFor } = require('../config/permissions');
 const { acceptInvite } = require('./staff.controller');
+const { resolveAccess } = require('../services/patientAccess');
 
 const STAFF_TITLES = {
   ADMIN: 'System Administrator',
@@ -504,9 +505,16 @@ async function updatePatient(req, res, next) {
   }
 }
 
+/** +919876543210 → +91******3210, for staff who haven't got the patient in their clinic. */
+function maskPhone(phone) {
+  return phone && phone.length > 7 ? phone.slice(0, 3) + '*'.repeat(phone.length - 7) + phone.slice(-4) : phone;
+}
+
 /**
  * @route   GET /api/patients/search?q=<query>
- * @desc    Search patients by name or Health ID (partial, case-insensitive)
+ * @desc    Name or Health ID search, limited to patients with an appointment at
+ *          the caller's clinic. An exact Health ID or phone finds anyone (as
+ *          /lookup does), with the phone masked outside the clinic.
  * @access  Private — patient:lookup
  */
 async function searchPatients(req, res, next) {
@@ -520,12 +528,24 @@ async function searchPatients(req, res, next) {
         message: 'Query parameter "q" must be at least 2 characters long.',
       });
     }
+    const clinic_id = req.user.clinic_id;
+    if (!clinic_id) {
+      return res.status(403).json({ success: false, error: 'Forbidden', message: 'No clinic is assigned to this account.' });
+    }
 
+    const phone = toE164(q);
     const patients = await prisma.patient.findMany({
       where: {
         OR: [
-          { name:      { contains: q, mode: 'insensitive' } },
-          { health_id: { contains: q, mode: 'insensitive' } },
+          { health_id: { equals: q, mode: 'insensitive' } },
+          ...(phone ? [{ phone }] : []),
+          {
+            appointments: { some: { clinic_id } },
+            OR: [
+              { name:      { contains: q, mode: 'insensitive' } },
+              { health_id: { contains: q, mode: 'insensitive' } },
+            ],
+          },
         ],
       },
       select: {
@@ -535,6 +555,7 @@ async function searchPatients(req, res, next) {
         phone:     true,
         gender:    true,
         dob:       true,
+        appointments: { where: { clinic_id }, select: { id: true }, take: 1 },
       },
       orderBy: { name: 'asc' },
       take: 10,
@@ -543,10 +564,44 @@ async function searchPatients(req, res, next) {
     return res.json({
       success: true,
       count: patients.length,
-      data: patients,
+      data: patients.map(({ appointments, ...p }) => (appointments.length ? p : { ...p, phone: maskPhone(p.phone) })),
     });
   } catch (error) {
     console.error('❌ Error searching patients:', error.message);
+    next(error);
+  }
+}
+
+/**
+ * @route   GET /api/patients/lookup?health_id=|phone=
+ * @desc    Exact match → demographics, a masked phone, and whether the caller
+ *          may open the records: access { allowed, via } (services/patientAccess.js).
+ *          Not logged: no record data is returned.
+ * @access  Private — patient:lookup
+ */
+async function lookupPatient(req, res, next) {
+  try {
+    const healthId = String(req.query.health_id || '').trim();
+    const phone = healthId ? null : toE164(String(req.query.phone || ''));
+    if (!healthId && !phone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Bad Request',
+        message: 'Pass an exact "health_id" or "phone" (10-digit Indian mobile, or with its country code).',
+      });
+    }
+
+    const patient = await prisma.patient.findFirst({
+      where: healthId ? { health_id: { equals: healthId, mode: 'insensitive' } } : { phone },
+      select: { id: true, name: true, health_id: true, gender: true, dob: true, phone: true },
+    });
+    if (!patient) {
+      return res.status(404).json({ success: false, error: 'Not Found', message: 'No patient matches that Health ID or phone.' });
+    }
+
+    const { allowed, via } = await resolveAccess(req.user, patient.id);
+    return res.json({ success: true, data: { ...patient, phone: maskPhone(patient.phone), access: { allowed, via } } });
+  } catch (error) {
     next(error);
   }
 }
@@ -559,4 +614,5 @@ module.exports = {
   getPatientById,
   updatePatient,
   searchPatients,
+  lookupPatient,
 };

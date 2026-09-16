@@ -34,6 +34,27 @@ enum UserStatus {
   DISABLED
 }
 
+enum ConsentMethod {
+  APP
+  CODE
+  EMERGENCY
+}
+
+enum ConsentStatus {
+  PENDING
+  APPROVED
+  DENIED
+  EXPIRED
+  REVOKED
+}
+
+enum AccessVia {
+  SELF
+  CARE
+  CONSENT
+  EMERGENCY
+}
+
 enum InteractionSeverity {
   MINOR
   MODERATE
@@ -61,6 +82,7 @@ model User {
   invites_sent     StaffInvite[] @relation("InvitedBy")
   invite_accepted  StaffInvite?  @relation("AcceptedBy")
   doctors_verified Doctor[]      @relation("VerifiedBy")
+  access_logs      PatientAccessLog[]
 
   @@map("users")
 }
@@ -90,6 +112,8 @@ model Patient {
   appointments       Appointment[]
   medical_records    MedicalRecord[]
   interaction_checks InteractionCheck[]
+  consent_requests   ConsentRequest[]
+  access_logs        PatientAccessLog[]
 
   @@map("patients")
 }
@@ -110,6 +134,7 @@ model Clinic {
   appointments Appointment[]
   users        User[]
   staff_invites StaffInvite[]
+  consent_requests ConsentRequest[]
 
   @@map("clinics")
 }
@@ -138,6 +163,7 @@ model Doctor {
   appointments       Appointment[]
   medical_records    MedicalRecord[]
   interaction_checks InteractionCheck[]
+  consent_requests   ConsentRequest[]
 
   @@map("doctors")
 }
@@ -281,4 +307,64 @@ model StaffInvite {
   @@index([email])
   @@index([phone])
   @@map("staff_invites")
+}
+
+// ------------------------------------------------------------
+// 10. Consent Request (Auth Phase 7)
+// ------------------------------------------------------------
+// A doctor outside the patient's care link needs one of these, APPROVED and
+// with granted_until in the future, to read the history:
+//   APP       doctor asks, patient approves in the app (PENDING 10 min, 24 h grant)
+//   CODE      patient makes a 6-digit share code (doctor_id null until redeemed)
+//   EMERGENCY doctor gives a reason, granted at once for 4 h and flagged
+// ------------------------------------------------------------
+model ConsentRequest {
+  id            String        @id @default(uuid()) @db.Uuid
+  patient_id    String        @db.Uuid
+  doctor_id     String?       @db.Uuid
+  clinic_id     String?       @db.Uuid
+  method        ConsentMethod
+  status        ConsentStatus
+  reason        String?       @db.Text
+  code_hash     String?
+  attempts      Int           @default(0)
+  expires_at    DateTime
+  granted_until DateTime?
+  responded_at  DateTime?
+  created_at    DateTime      @default(now())
+
+  patient     Patient            @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  doctor      Doctor?            @relation(fields: [doctor_id], references: [id], onDelete: Cascade)
+  clinic      Clinic?            @relation(fields: [clinic_id], references: [id], onDelete: SetNull)
+  access_logs PatientAccessLog[]
+
+  @@index([patient_id, doctor_id, status])
+  @@map("consent_requests")
+}
+
+// ------------------------------------------------------------
+// 11. Patient Access Log (Auth Phase 7)
+// ------------------------------------------------------------
+// One row per allowed staff read/write of a patient's records. A patient's
+// own reads (via SELF) are not logged. clinic_id is the reader's clinic at the
+// time, so the audit list survives a doctor moving clinics.
+// ------------------------------------------------------------
+model PatientAccessLog {
+  id             String    @id @default(uuid()) @db.Uuid
+  patient_id     String    @db.Uuid
+  user_id        String?   @db.Uuid
+  clinic_id      String?   @db.Uuid
+  via            AccessVia
+  consent_id     String?   @db.Uuid
+  appointment_id String?   @db.Uuid
+  action         String
+  created_at     DateTime  @default(now())
+
+  patient Patient         @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  user    User?           @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  consent ConsentRequest? @relation(fields: [consent_id], references: [id], onDelete: SetNull)
+
+  @@index([patient_id])
+  @@index([clinic_id])
+  @@map("patient_access_logs")
 }

@@ -1549,6 +1549,386 @@
           }
         }
       ]
+    },
+    {
+      "name": "07. Consent & Access (Auth Phase 7)",
+      "description": "Doctors outside a care link (a record they wrote, or a non-cancelled appointment at their clinic within ±30 days) get 403 { code: CONSENT_REQUIRED } on /records/*. These requests grant access.",
+      "item": [
+        {
+          "name": "1. Look Up Patient (exact Health ID or phone)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{doctor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/patients/lookup?health_id={{patient_health_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "patients",
+                "lookup"
+              ],
+              "query": [
+                {
+                  "key": "health_id",
+                  "value": "{{patient_health_id}}"
+                }
+              ]
+            },
+            "description": "patient:lookup. Demographics, masked phone, and access {allowed, via: SELF|CARE|CONSENT|EMERGENCY|null}. Also ?phone=."
+          }
+        },
+        {
+          "name": "2. Request Consent (doctor)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.id) pm.environment.set(\"consent_id\", json.data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{doctor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/consents",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "consents"
+              ]
+            },
+            "description": "consent:request. PENDING for 10 minutes; at most 3 per doctor and patient per hour (429).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patient_id\": \"{{patient_id}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "3. Poll Consent (doctor)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{doctor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/consents/{{consent_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "consents",
+                "{{consent_id}}"
+              ]
+            },
+            "description": "The doctor's own request; status PENDING → APPROVED | DENIED | EXPIRED | REVOKED."
+          }
+        },
+        {
+          "name": "4. Pending Requests (patient)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/consents/pending",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "consents",
+                "pending"
+              ]
+            },
+            "description": "consent:respond. App requests waiting for an answer, with doctor and clinic."
+          }
+        },
+        {
+          "name": "5. Respond to Request (patient)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/consents/{{consent_id}}/respond",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "consents",
+                "{{consent_id}}",
+                "respond"
+              ]
+            },
+            "description": "approve: true → APPROVED for 24 hours; false → DENIED. An expired or answered request → 409.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approve\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "6. Create Share Code (patient)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/consents/share-code",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "consents",
+                "share-code"
+              ]
+            },
+            "description": "Returns a 6-digit code once. Valid 10 minutes, single use; a new code retires the old one."
+          }
+        },
+        {
+          "name": "7. Redeem Share Code (doctor)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{doctor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/consents/redeem",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "consents",
+                "redeem"
+              ]
+            },
+            "description": "→ 24-hour grant. Wrong code → 403 with attempts_left; 5 wrong → 423.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patient_id\": \"{{patient_id}}\",\n  \"code\": \"000000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "8. Emergency Access (doctor)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{doctor_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/consents/emergency",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "consents",
+                "emergency"
+              ]
+            },
+            "description": "consent:emergency. reason ≥ 20 characters → 4-hour grant, flagged in the audit list and the patient's access history.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"patient_id\": \"{{patient_id}}\",\n  \"reason\": \"Unconscious on arrival, need allergy history\"\n}"
+            }
+          }
+        },
+        {
+          "name": "9. My Consents and Access History (patient)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/consents/mine",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "consents",
+                "mine"
+              ]
+            },
+            "description": "{ consents, access_log }: grants with doctor/clinic, and every staff access with via and reason."
+          }
+        },
+        {
+          "name": "10. Revoke Grant (patient)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{patient_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/consents/{{consent_id}}/revoke",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "consents",
+                "{{consent_id}}",
+                "revoke"
+              ]
+            },
+            "description": "Ends an active grant; the doctor gets CONSENT_REQUIRED again."
+          }
+        },
+        {
+          "name": "11. Access Audit (audit:read)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/access",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "audit",
+                "access"
+              ]
+            },
+            "description": "CLINIC_ADMIN: own clinic only. ADMIN: all clinics, or ?clinic_id=."
+          }
+        }
+      ]
     }
   ]
 }

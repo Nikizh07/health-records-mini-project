@@ -1,6 +1,6 @@
 # Plan: Registration, RBAC and patient consent
 
-**Status (2026-09-15): Phases 1–3 done. Phases 4–6 built and tested; their click-throughs in a real browser are pending. Phases 7–8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
+**Status (2026-09-15): Phases 1–3 and 7 done. Phases 4–6 built and tested; their click-throughs in a real browser are pending. Phase 8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
 
 ## Context
 
@@ -300,7 +300,9 @@ Every allowed read of patient data writes a `PatientAccessLog` row.
 
 **Done when:** a receptionist registers a walk-in, books them with a doctor, and the doctor sees them in the queue.
 
-## Phase 7: Consent API
+## Phase 7: Consent API ✅ done 2026-09-15
+
+*As built:* redeem takes `{patient_id, code}`; the access log also stores `clinic_id` and skips SELF reads; `authorizePatientAccess.js` stays for `/patients/:id` demographics; exact Health ID/phone search still finds patients outside the clinic, phone masked (see `MEMORY.md`).
 
 **Goal:** doctor reads of patient data require a care link, consent or emergency, and every read is logged.
 

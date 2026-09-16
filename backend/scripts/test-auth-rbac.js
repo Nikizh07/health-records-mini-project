@@ -11,6 +11,7 @@
 // Phase 3: staff onboarding — invites, doctor applications, approve/reject/disable.
 // Phase 5: desk registration (no account) and the patient's claim by date of birth.
 // Phase 6: front desk — clinic queue, walk-ins with a named doctor, confirm, no records.
+// Phase 7: consent — care link, app request, share code, emergency, revoke, access log, lookup.
 //
 // Same harness as scripts/test-interactions.js: Firebase is stubbed in
 // require.cache before the app loads and the real Express app is driven over
@@ -302,9 +303,13 @@ async function main() {
     'staff:manage': ['POST', '/doctors', {}],
     'clinic:update': ['PUT', '/clinics/not-a-uuid', {}],
     'clinic:create': ['POST', '/clinics', {}],
+    'consent:respond': ['GET', '/consents/pending'],
+    'consent:request': ['POST', '/consents', {}],
+    'consent:emergency': ['POST', '/consents/emergency', {}],
+    'audit:read': ['GET', '/audit/access'],
   };
   // Permissions whose endpoints arrive in a later phase.
-  const LATER = ['consent:respond', 'consent:request', 'consent:emergency', 'audit:read'];
+  const LATER = [];
 
   section('Phase 2 · every permission in the table is tested');
   const allPerms = [...new Set(Object.values(PERMISSIONS).flat())];
@@ -655,6 +660,177 @@ async function main() {
     ok(`RECEPTIONIST ${method} ${endpoint.replace(/[0-9a-f-]{36}/g, ':id')} → 403`, r.status === 403, detail(r));
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // Phase 7: consent
+  // ═══════════════════════════════════════════════════════════
+  const docP7User = await prisma.user.create({ data: { firebase_uid: `${TAG}-p7doc`, email: mail('p7doc'), role: 'DOCTOR' } });
+  await prisma.doctor.create({ data: { user_id: docP7User.id, clinic_id: clinic2.id, name: `${TAG} Dr Far`, specialization: 'GP', email: mail('p7doc') } });
+  const FAR = token({ uid: 'p7doc', provider: 'password' }); // a doctor at clinic2, no link to p7
+  const p7User = await prisma.user.create({ data: { firebase_uid: `${TAG}-p7pat`, phone: `+9187${N}`, role: 'PATIENT' } });
+  const p7 = await prisma.patient.create({
+    data: { user_id: p7User.id, health_id: `MWH-${N.slice(-6)}`, name: `Zed ${TAG}`, phone: `+9187${N}`, dob: new Date('1980-03-03'), gender: 'Male', language_pref: 'Hindi' },
+  });
+  const P7 = token({ uid: 'p7pat', phone: `+9187${N}` });
+  const p7Record = await prisma.medicalRecord.create({ data: { patient_id: p7.id, doctor_id: doctorA.id, visit_date: new Date(), diagnosis: 'Asthma', notes: '' } });
+  const history = (tok, id = p7.id) => api('GET', `/records/patient/${id}`, { token: tok });
+  const logs = (where) => prisma.patientAccessLog.findMany({ where: { patient_id: p7.id, ...where }, orderBy: { created_at: 'desc' } });
+
+  section('Phase 7 · records need a care link, consent or emergency');
+  r = await history(FAR);
+  ok('a doctor at another clinic gets 403 CONSENT_REQUIRED', r.status === 403 && r.body?.code === 'CONSENT_REQUIRED', detail(r));
+  r = await history(FAR, p7.health_id);
+  ok('…by Health ID too', r.status === 403 && r.body?.code === 'CONSENT_REQUIRED', detail(r));
+  r = await api('GET', `/records/${p7Record.id}`, { token: FAR });
+  ok('…and for a single record', r.status === 403 && r.body?.code === 'CONSENT_REQUIRED', detail(r));
+  r = await api('POST', '/records', { token: FAR, body: { patient_id: p7.id, diagnosis: 'Checkup' } });
+  ok('…and to write a visit', r.status === 403 && r.body?.code === 'CONSENT_REQUIRED', detail(r));
+  r = await api('POST', '/records/interaction-check', { token: FAR, body: { patient_id: p7.id, prescriptions: [] } });
+  ok('…and to run an interaction check', r.status === 403 && r.body?.code === 'CONSENT_REQUIRED', detail(r));
+  r = await api('POST', `/records/${p7Record.id}/upload`, { token: FAR });
+  ok('…and to upload a report', r.status === 403 && r.body?.code === 'CONSENT_REQUIRED', detail(r));
+  r = await history(FAR, '00000000-0000-4000-8000-000000000000');
+  ok('an unknown patient is still a 404', r.status === 404, detail(r));
+  ok('refused requests write no log rows', (await logs({})).length === 0);
+
+  r = await history(DOC_A);
+  let [row] = await logs({});
+  ok('the doctor who wrote a record reads via CARE', r.status === 200 && row?.via === 'CARE' && row?.action === 'READ_HISTORY', detail(r));
+  ok('…logged with who and which clinic', row?.user_id === (await prisma.user.findUnique({ where: { firebase_uid: `${TAG}-docA` } })).id && row?.clinic_id === clinic.id);
+  const before7 = (await logs({})).length;
+  await api('GET', `/records/${p7Record.id}`, { token: DOC_A });
+  ok('every allowed read writes a row', (await logs({})).length === before7 + 1);
+  r = await history(P7);
+  ok("the patient reads their own history, and it isn't logged", r.status === 200 && (await logs({})).length === before7 + 1, detail(r));
+
+  section('Phase 7 · lookup and search');
+  r = await api('GET', `/patients/lookup?health_id=${p7.health_id.toLowerCase()}`, { token: FAR });
+  ok('exact Health ID lookup → demographics, masked phone, access refused',
+    r.status === 200 && r.body?.data?.name === p7.name && r.body.data.phone !== p7.phone && r.body.data.phone.endsWith(p7.phone.slice(-4)) &&
+      r.body.data.access?.allowed === false, detail(r));
+  r = await api('GET', `/patients/lookup?phone=${p7.phone.slice(3)}`, { token: DOC_A });
+  ok('exact phone lookup reports CARE for the treating doctor', r.status === 200 && r.body?.data?.access?.via === 'CARE', detail(r));
+  r = await api('GET', '/patients/lookup', { token: FAR });
+  ok('lookup needs a Health ID or phone', r.status === 400, detail(r));
+  r = await api('GET', '/patients/lookup?health_id=MWH-NOPE00', { token: FAR });
+  ok('no match → 404', r.status === 404, detail(r));
+  r = await api('GET', `/patients/search?q=${encodeURIComponent('Zed ' + TAG)}`, { token: FAR });
+  ok("name search doesn't reach patients outside the caller's clinic", r.status === 200 && r.body.data.length === 0, detail(r));
+  r = await api('GET', `/patients/search?q=${p7.health_id}`, { token: FAR });
+  ok('…an exact Health ID does, with the phone masked', r.status === 200 && r.body.data.length === 1 && r.body.data[0].phone.includes('*'), detail(r));
+  r = await api('GET', '/patients/search?q=Fixture%20Patient', { token: AS.RECEPTIONIST });
+  ok("name search finds the clinic's own patients, phone shown", r.status === 200 && r.body.data.some((p) => p.id === patient.id && p.phone === patient.phone), detail(r));
+
+  section('Phase 7 · in-app request');
+  r = await api('POST', '/consents', { token: FAR, body: { patient_id: p7.id } });
+  const req1 = r.body?.data;
+  ok('the doctor asks → PENDING for 10 minutes', r.status === 201 && req1?.status === 'PENDING' && new Date(req1.expires_at) - Date.now() <= 10 * 60e3, detail(r));
+  r = await api('GET', '/consents/pending', { token: P7 });
+  ok('the patient sees it with the doctor and clinic', r.status === 200 && r.body.data.some((c) => c.id === req1?.id && c.doctor?.name && c.clinic?.id === clinic2.id), detail(r));
+  r = await api('POST', `/consents/${req1?.id}/respond`, { token: AS.PATIENT, body: { approve: true } });
+  ok("another patient can't answer it", r.status === 404, detail(r));
+  r = await api('POST', `/consents/${req1?.id}/respond`, { token: P7, body: { approve: 'yes' } });
+  ok('approve must be a boolean', r.status === 400, detail(r));
+  r = await api('POST', `/consents/${req1?.id}/respond`, { token: P7, body: { approve: true } });
+  ok('the patient approves → a 24-hour grant', r.status === 200 && r.body?.data?.status === 'APPROVED' && new Date(r.body.data.granted_until) - Date.now() > 23 * 3600e3, detail(r));
+  r = await api('GET', `/consents/${req1?.id}`, { token: FAR });
+  ok('the doctor polls it as APPROVED', r.status === 200 && r.body?.data?.status === 'APPROVED', detail(r));
+  r = await history(FAR);
+  [row] = await logs({});
+  ok('…and reads the history via CONSENT, linked to the grant', r.status === 200 && row?.via === 'CONSENT' && row?.consent_id === req1?.id, detail(r));
+  r = await api('POST', `/consents/${req1?.id}/respond`, { token: P7, body: { approve: false } });
+  ok('an answered request cannot be answered again', r.status === 409, detail(r));
+  r = await api('POST', `/consents/${req1?.id}/revoke`, { token: P7 });
+  ok('the patient revokes it', r.status === 200 && r.body?.data?.status === 'REVOKED', detail(r));
+  r = await history(FAR);
+  ok('…and the doctor is refused again', r.status === 403 && r.body?.code === 'CONSENT_REQUIRED', detail(r));
+  r = await api('POST', `/consents/${req1?.id}/revoke`, { token: P7 });
+  ok('revoking twice → 409', r.status === 409, detail(r));
+
+  r = await api('POST', '/consents', { token: FAR, body: { patient_id: p7.id } });
+  const req2 = r.body?.data;
+  r = await api('POST', `/consents/${req2?.id}/respond`, { token: P7, body: { approve: false } });
+  ok('the patient denies → DENIED', r.status === 200 && r.body?.data?.status === 'DENIED', detail(r));
+  r = await history(FAR);
+  ok('…and the doctor gets 403', r.status === 403, detail(r));
+  r = await api('POST', '/consents', { token: FAR, body: { patient_id: p7.id } });
+  ok('a 3rd request in the hour is allowed', r.status === 201, detail(r));
+  r = await api('POST', '/consents', { token: FAR, body: { patient_id: p7.id } });
+  ok('the 4th → 429', r.status === 429, detail(r));
+
+  const stale = await prisma.consentRequest.create({
+    data: { patient_id: p7.id, doctor_id: (await prisma.doctor.findUnique({ where: { user_id: docP7User.id } })).id, clinic_id: clinic2.id, method: 'APP', status: 'PENDING', expires_at: new Date(Date.now() - 1000) },
+  });
+  r = await api('POST', `/consents/${stale.id}/respond`, { token: P7, body: { approve: true } });
+  ok('an expired request cannot be approved', r.status === 409, detail(r));
+  r = await api('GET', `/consents/${stale.id}`, { token: FAR });
+  ok('…and polls as EXPIRED', r.body?.data?.status === 'EXPIRED', detail(r));
+  r = await api('GET', `/consents/${stale.id}`, { token: DOC_A });
+  ok("a doctor can't poll someone else's request", r.status === 404, detail(r));
+
+  section('Phase 7 · share code');
+  r = await api('POST', '/consents/share-code', { token: P7 });
+  const code1 = r.body?.data?.code;
+  ok('the patient gets a 6-digit code', r.status === 201 && /^\d{6}$/.test(code1 || ''), detail(r));
+  ok('…stored only as a hash', (await prisma.consentRequest.findUnique({ where: { id: r.body?.data?.id } }))?.code_hash?.length === 64);
+  const wrong = (c) => String((Number(c) + 1) % 1e6).padStart(6, '0');
+  r = await api('POST', '/consents/redeem', { token: FAR, body: { patient_id: p7.id, code: '12' } });
+  ok('the code must be 6 digits', r.status === 400, detail(r));
+  r = await api('POST', '/consents/redeem', { token: FAR, body: { patient_id: p7.id, code: wrong(code1) } });
+  ok('a wrong code → 403 with attempts left', r.status === 403 && r.body?.attempts_left === 4, detail(r));
+  r = await api('POST', '/consents/redeem', { token: FAR, body: { patient_id: p7.id, code: code1 } });
+  ok('the right code → a 24-hour grant', r.status === 200 && r.body?.data?.status === 'APPROVED', detail(r));
+  r = await history(FAR);
+  ok('…and the history opens', r.status === 200, detail(r));
+  r = await api('POST', '/consents/redeem', { token: FAR, body: { patient_id: p7.id, code: code1 } });
+  ok('a code works once', r.status === 404, detail(r));
+
+  r = await api('POST', '/consents/share-code', { token: P7 });
+  const code2 = r.body?.data?.code;
+  const bad = [];
+  for (let i = 0; i < 5; i++) bad.push((await api('POST', '/consents/redeem', { token: DOC_A, body: { patient_id: p7.id, code: wrong(code2) } })).status);
+  r = await api('POST', '/consents/redeem', { token: DOC_A, body: { patient_id: p7.id, code: code2 } });
+  ok('5 wrong codes lock it: even the right one → 423', bad.every((s) => s === 403) && r.status === 423, `${bad} then ${r.status}`);
+
+  section('Phase 7 · emergency access');
+  r = await api('GET', '/consents/mine', { token: P7 });
+  const live = (r.body?.data?.consents || []).filter((c) => c.status === 'APPROVED');
+  ok('the patient lists their grants', r.status === 200 && live.length === 1 && live[0].method === 'CODE', detail(r));
+  await api('POST', `/consents/${live[0]?.id}/revoke`, { token: P7 });
+  r = await api('POST', '/consents/emergency', { token: FAR, body: { patient_id: p7.id, reason: 'urgent' } });
+  ok('emergency without a real reason → 400', r.status === 400, detail(r));
+  const REASON = 'Unconscious on arrival, need allergy history';
+  r = await api('POST', '/consents/emergency', { token: FAR, body: { patient_id: p7.id, reason: REASON } });
+  ok('emergency with a reason → a 4-hour grant', r.status === 201 && r.body?.data?.method === 'EMERGENCY' && new Date(r.body.data.granted_until) - Date.now() <= 4 * 3600e3, detail(r));
+  r = await history(FAR);
+  [row] = await logs({});
+  ok('…the history opens via EMERGENCY', r.status === 200 && row?.via === 'EMERGENCY', detail(r));
+  r = await api('GET', '/consents/mine', { token: P7 });
+  ok("…flagged in the patient's access history with the reason",
+    r.body?.data?.access_log?.some((l) => l.via === 'EMERGENCY' && l.consent?.reason === REASON && l.user?.doctor?.clinic?.id === clinic2.id), detail(r));
+  r = await api('GET', '/audit/access', { token: CADMIN2 });
+  ok("…and in that clinic's audit list", r.status === 200 && r.body.data.some((l) => l.via === 'EMERGENCY' && l.patient?.id === p7.id), detail(r));
+  r = await api('GET', `/audit/access?clinic_id=${clinic2.id}`, { token: AS.CLINIC_ADMIN });
+  ok("a clinic admin can't read another clinic's audit list", r.status === 403, detail(r));
+  r = await api('GET', '/audit/access', { token: AS.CLINIC_ADMIN });
+  ok('…only their own', r.status === 200 && r.body.data.length > 0 && r.body.data.every((l) => l.clinic_id === clinic.id), detail(r));
+  r = await api('GET', '/audit/access', { token: ADMIN });
+  ok('ADMIN reads across clinics', r.status === 200 && new Set(r.body.data.map((l) => l.clinic_id)).size >= 2, detail(r));
+
+  section('Phase 7 · a walk-in creates a care link');
+  const p7b = await prisma.patient.create({
+    data: { health_id: `MWH-B${N.slice(-5)}`, name: 'Walk-in Care', phone: `+9186${N}`, dob: new Date('1970-07-07'), gender: 'Female', language_pref: 'Tamil' },
+  });
+  r = await history(FAR, p7b.id);
+  ok('no link before the visit', r.status === 403, detail(r));
+  r = await api('POST', '/appointments', { token: CADMIN2, body: { patient_id: p7b.id, doctor_id: doctorOther.id } });
+  const walk = r.body?.data;
+  r = await history(FAR, p7b.id);
+  const [careRow] = await prisma.patientAccessLog.findMany({ where: { patient_id: p7b.id } });
+  ok('a walk-in at the clinic → CARE, logged with the appointment', r.status === 200 && careRow?.via === 'CARE' && careRow?.appointment_id === walk?.id, detail(r));
+  await api('PATCH', `/appointments/${walk?.id}/cancel`, { token: CADMIN2 });
+  r = await history(FAR, p7b.id);
+  ok('a cancelled appointment is no care link', r.status === 403, detail(r));
+
   // ───────────────────────────────────────────────────────────
   section('A database failure is a 500, not a logout');
   const findUnique = prisma.user.findUnique;
@@ -669,7 +845,7 @@ async function main() {
   const users = await prisma.user.findMany({ where: { firebase_uid: { startsWith: TAG } }, select: { id: true } });
   const userIds = users.map((u) => u.id);
   const patients = await prisma.patient.findMany({
-    where: { OR: [{ id: { in: [patient.id, patient2.id] } }, { user_id: { in: userIds } }, { phone: { in: [DESK_PHONE, LOCK_PHONE] } }] },
+    where: { OR: [{ id: { in: [patient.id, patient2.id, p7b.id] } }, { user_id: { in: userIds } }, { phone: { in: [DESK_PHONE, LOCK_PHONE] } }] },
     select: { id: true },
   });
   const patientIds = patients.map((p) => p.id);

@@ -384,7 +384,8 @@ async function createMedicalRecord(req, res, next) {
  * ------------------------------------------------------------
  * Retrieves the complete longitudinal medical history for a patient.
  * - Core feature: Cross-clinic history follows the patient everywhere!
- * - Accessible by: The patient themselves, or record:read (doctors).
+ * - Accessible by: the patient themselves, or a doctor with a care link,
+ *   consent or emergency grant (requirePatientAccess).
  * - Supports lookup by Patient UUID or Health ID (e.g. MWH-XXXXXX).
  * ------------------------------------------------------------
  */
@@ -421,22 +422,7 @@ async function getPatientMedicalHistory(req, res, next) {
       });
     }
 
-    // ── 2. Without record:read, only your own history ────────
-    if (!req.user.permissions.includes('record:read')) {
-      // Patients can only view their own history
-      const user = await prisma.user.findUnique({
-        where: { firebase_uid: req.user.uid },
-        include: { patient: true },
-      });
-
-      if (!user?.patient || user.patient.id !== patient.id) {
-        return res.status(403).json({
-          success: false,
-          error: 'Forbidden',
-          message: 'Access denied. You are only authorized to view your own medical history.',
-        });
-      }
-    }
+    // ── 2. Access (self, care link, consent) is checked by requirePatientAccess ──
 
     // ── 3. Fetch Full Longitudinal History ───────────────────
     // Notice: We intentionally DO NOT filter by clinic_id or doctor_id!
@@ -475,7 +461,7 @@ async function getPatientMedicalHistory(req, res, next) {
  * 3. GET /api/records/:id
  * ------------------------------------------------------------
  * Single medical record details by record UUID.
- * - Accessible by: The patient themselves, or record:read (doctors).
+ * - Accessible by: the patient, or a doctor with access (requirePatientAccess).
  * ------------------------------------------------------------
  */
 async function getMedicalRecordById(req, res, next) {
@@ -503,21 +489,7 @@ async function getMedicalRecordById(req, res, next) {
       });
     }
 
-    // Authorization check for patients
-    if (!req.user.permissions.includes('record:read')) {
-      const user = await prisma.user.findUnique({
-        where: { firebase_uid: req.user.uid },
-        include: { patient: true },
-      });
-
-      if (!user?.patient || user.patient.id !== record.patient_id) {
-        return res.status(403).json({
-          success: false,
-          error: 'Forbidden',
-          message: 'Access denied. You can only view your own medical records.',
-        });
-      }
-    }
+    // Access (self, care link, consent) is checked by requirePatientAccess.
 
     return res.status(200).json({
       success: true,

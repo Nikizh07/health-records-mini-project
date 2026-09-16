@@ -161,6 +161,11 @@ async function main() {
       },
     });
     patientIds.push(p.id);
+    // Since Auth Phase 7 a doctor needs a care link to check a patient: an
+    // appointment at Dr B's clinic gives one.
+    await prisma.appointment.create({
+      data: { patient_id: p.id, doctor_id: doctorB.id, clinic_id: clinicB.id, slot_time: new Date() },
+    });
     return p;
   }
 

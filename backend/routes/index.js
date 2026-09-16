@@ -15,6 +15,7 @@ const doctorRouter      = require('./doctor.routes');      // Day 11
 const appointmentRouter = require('./appointment.routes'); // Day 12
 const recordRouter      = require('./record.routes');      // Day 13
 const staffRouter       = require('./staff.routes');       // Auth Phase 3
+const { consentRouter, auditRouter } = require('./consent.routes'); // Auth Phase 7
 
 // Mount sub-routers
 router.use('/health',       healthRouter);
@@ -25,5 +26,7 @@ router.use('/doctors',      doctorRouter);      // GET|POST /api/doctors, GET|PU
 router.use('/appointments', appointmentRouter); // Day 12: Appointment endpoints
 router.use('/records',      recordRouter);      // Day 13: Medical records & prescriptions
 router.use('/staff',        staffRouter);       // invites, doctor applications, approve/reject/disable
+router.use('/consents',     consentRouter);     // consent requests, share codes, emergency access
+router.use('/audit',        auditRouter);       // GET /api/audit/access
 
 module.exports = router;

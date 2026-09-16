@@ -57,6 +57,13 @@ router.get('/me', patientController.getMyProfile);
 router.get('/search', requirePermission('patient:lookup'), patientController.searchPatients);
 
 /**
+ * @route   GET /api/patients/lookup?health_id=|phone=
+ * @desc    Exact lookup: demographics, masked phone, access { allowed, via }
+ * @access  Private — patient:lookup
+ */
+router.get('/lookup', requirePermission('patient:lookup'), patientController.lookupPatient);
+
+/**
  * @route   GET /api/patients/:id
  * @desc    Fetch single patient profile by ID
  * @access  Private (Self or patient:lookup)

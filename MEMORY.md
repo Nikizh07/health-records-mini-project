@@ -35,7 +35,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - ~~Known gap: same-visit pairs don't fire~~ — closed 2026-09-12.
 
 ## Planned: registration, RBAC and patient consent
-- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-3 done; Phases 4-6 built and tested (2026-09-15), user click-throughs pending; next is 7.**
+- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-3 and 7 done (Phase 7 is API only); Phases 4-6 built and tested (2026-09-15), user click-throughs pending; next is 8 (consent UI).**
 - Split into 8 phases, one migration per phase (2026-09-13):
   1. identity hardening
   2. roles + permission table
@@ -69,6 +69,23 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-15: Auth/RBAC Phase 7 — consent API.** Backend only.
+  - Migration `20260915200000_add_consent`: `consent_requests` (method APP/CODE/EMERGENCY, status PENDING/APPROVED/DENIED/EXPIRED/REVOKED) and `patient_access_logs` (via SELF/CARE/CONSENT/EMERGENCY). **The log also stores `clinic_id`** (the reader's clinic at the time, for the audit list) and `user_id` is a nullable FK with SET NULL, so audit rows outlive a deleted user.
+  - `services/patientAccess.js` `resolveAccess(user, patientId)`: SELF → CARE (a record this doctor wrote, or a non-cancelled appointment at the doctor's clinic within ±30 days) → an in-date APPROVED grant (CONSENT, or EMERGENCY by method). Only `record:read` holders with a doctor profile can get past SELF.
+  - `middleware/requirePatientAccess.js` sits on all five `/records` routes (before multer on upload). Refused → 403 `{code: 'CONSENT_REQUIRED', patient_id}` for doctors (plain 403 for others). Allowed staff requests write a log row **and fail closed if the row can't be written**.
+    - **A patient's own reads (SELF) are not logged**: the patient app polls records every 10 s and would flood the log.
+    - **Gotcha:** it passes through when it can't identify the patient (malformed id, no such patient/record) and relies on the controller to 400/404. So the locator must find patients exactly as the controller does. The history route accepts any health ID string, not just `MWH-…`, so the locator does too. Change one and you must change the other, or a request slips past the gate.
+  - `GET /patients/lookup?health_id=|phone=` (patient:lookup): exact match → demographics, phone masked `+91******3210`, `access {allowed, via}`. Not logged (no record data).
+  - `/patients/search`: name matches only for patients with an appointment at the caller's clinic. **An exact Health ID or phone still finds anyone**, with the phone masked outside the clinic, so the Phase 6 front desk can book a walk-in for an existing patient without new UI.
+  - `/consents` + `/audit/access` (`routes/consent.routes.js`, `controllers/consent.controller.js`). All state changes are conditional `updateMany`. Deviations from the plan:
+    - **Redeem takes `{patient_id, code}`**, not a bare code: a 6-digit code alone would be guessable across every patient's live code.
+    - The share code is stored as `sha256(id:code)`; 5 wrong tries → 423 (attempt taken atomically before comparing). A new code retires the old one; a new app request retires the doctor's pending one, so the patient sees one popup.
+    - Status is computed on read: a lapsed PENDING or grant reads as `EXPIRED`; nothing sweeps the table.
+  - **`authorizePatientAccess.js` is kept** (the plan said replace it): it still gates `/patients/:id` demographics, where `patient:lookup` staff are meant to pass. The record routes stopped using it in Phase 2.
+  - **What the current app sees before Phase 8:** a doctor opening a patient outside their care link gets the 403 message in `_PatientHistory`, and doctor/front-desk name search only finds their clinic's patients.
+  - Tests: `test-auth-rbac.js` 302/302 (matrix now covers all 15 permissions; CONSENT_REQUIRED on all five record routes incl. by Health ID; CARE by record and by walk-in, cancelled appointment → no care; logs per allowed read, none for refusals or SELF; lookup/search masking and clinic limit; request → approve → read → revoke → 403; deny; 4th request → 429; expired can't be approved; share code redeem, single use, 5 wrong → 423; emergency reason, flagged in `/consents/mine` and the clinic audit; clinic admin audit scope). `test-interactions.js` 112/112 after giving each fixture patient an appointment with the checking doctor. Postman: `07. Consent & Access` + `consent_id` env var.
+  - The `pg` "client.query() when the client is already executing a query" deprecation warning in the test output predates this phase (it fires during Phase 1 doctor linking).
+  - Known gap spotted, not fixed: `PUT /patients/:id` lets any `patient:lookup` staff edit any patient's demographics (authorizePatientAccess passes them), not just their clinic's.
 - **2026-09-15: Auth/RBAC Phase 6 — receptionist front desk.**
   - **Backend was mostly done already**: Phase 2 had scoped `appointment:manage` (clinic-wide queue for RECEPTIONIST/CLINIC_ADMIN, walk-in doctor must be at the caller's clinic, reschedule/cancel scoped) and moved the routes to permissions. The only gap was that **no confirm action existed**, so new `PATCH /appointments/:id/confirm` (pending → confirmed, conditional `updateMany`, same `outsideStaffScope`). Postman `04. Appointment Module` request 6.
   - **No new routes or nav entries, unlike the plan.** The existing `/doctor/today-appointments` and `/doctor/patients` screens adapt by permission, so the receptionist nav is Queue + Patients:

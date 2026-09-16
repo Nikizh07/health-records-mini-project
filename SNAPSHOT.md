@@ -8,7 +8,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-6 built
+├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-7 built
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
@@ -48,24 +48,28 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── patient.routes.js, doctor.routes.js, clinic.routes.js
 │   │   ├── appointment.routes.js
 │   │   ├── staff.routes.js        # /staff: invites, doctor applications, list, approve/reject/disable
+│   │   ├── consent.routes.js      # /consents (request, respond, share code, redeem, emergency, mine, revoke) + /audit/access
 │   │   └── record.routes.js       # records, POST /interaction-check, POST /:id/upload (multer)
 │   ├── controllers/
-│   │   ├── health.controller.js, patient.controller.js (+ desk registration, claim by DOB), doctor.controller.js
+│   │   ├── health.controller.js, patient.controller.js (+ desk registration, claim by DOB, lookup), doctor.controller.js
 │   │   ├── clinic.controller.js, appointment.controller.js (+ confirm)
 │   │   ├── staff.controller.js    # buildInvite (shared with POST /doctors), acceptInvite (used by /patients/me),
 │   │   │                          # applications, staff list, approve/reject/disable
+│   │   ├── consent.controller.js  # consent flows (§D of AUTH_RBAC_CONSENT_PLAN.md) and the access audit list
 │   │   └── record.controller.js   # medical records, prescriptions, report upload,
 │   │                              # POST /interaction-check (drug conflict pre-flight), and
 │   │                              # createMedicalRecord's check_id / override_reason audit wiring
 │   ├── middleware/
 │   │   ├── authenticate.js        # verifies Firebase ID token → req.user
 │   │   ├── requirePermission.js   # permission gate (any of the listed permissions)
-│   │   ├── authorizePatientAccess.js  # self, or patient:lookup for demographics
+│   │   ├── authorizePatientAccess.js  # /patients/:id: self, or patient:lookup for demographics
+│   │   ├── requirePatientAccess.js    # /records gate: care link / consent / emergency, writes patient_access_logs
 │   │   ├── upload.js              # multer local-disk storage, 5 MB, PDF/PNG/JPG/WEBP
 │   │   ├── errorHandler.js, notFound.js
 │   ├── prompts/
 │   │   └── drug-interaction.md    # LLM prompt for the AI leg (system / ---USER--- / {{placeholders}})
 │   ├── services/
+│   │   ├── patientAccess.js       # resolveAccess(user, patientId) → SELF | CARE | CONSENT | EMERGENCY
 │   │   ├── interactionChecker.js  # drug conflict detector: new-vs-active (cross-clinic) AND
 │   │   │                          # new-vs-new in the same visit; curated table + optional AI leg (fails open)
 │   │   └── ai/
@@ -76,7 +80,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   └── migrations/            # 20260810170839_init_schema, 20260910082706,
 │   │                              # 20260912122022_add_drug_interactions, 20260912122039_add_history_indexes,
 │   │                              # 20260915000000_add_roles_status, 20260915120000_add_staff_onboarding,
-│   │                              # 20260915180000_add_patient_registered_by
+│   │                              # 20260915180000_add_patient_registered_by, 20260915200000_add_consent
 │   ├── utils/
 │   │   ├── healthId.js            # MWH-XXXXXX health ID generator
 │   │   ├── phone.js               # toE164(): every stored/matched phone goes through it (+91 default)
@@ -90,7 +94,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── test-auth-rbac.js      # auth/RBAC regression suite (AUTH_RBAC_CONSENT_PLAN.md), one section per phase;
 │   │   │                          # same stubbed-Firebase harness as test-interactions.js
 │   │   └── test-ai-provider.js    # smoke-tests whichever AI provider .env configures (no DB)
-│   ├── postman/                   # API collection + environment (06. Staff Onboarding since Auth Phase 3)
+│   ├── postman/                   # API collection + environment (06. Staff Onboarding, 07. Consent & Access)
 │   ├── models/README.md
 │   └── uploads/reports/           # local uploaded reports (1 test PDF)
 │
