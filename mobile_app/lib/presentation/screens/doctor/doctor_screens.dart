@@ -9,6 +9,7 @@ import '../../../providers/doctor_provider.dart';
 import '../../../providers/records_provider.dart';
 import '../../widgets/responsive_card_list.dart';
 import '../clinic/clinic_shell.dart';
+import '../consent/consent_screens.dart';
 import '../reception/reception_screens.dart';
 
 // ============================================================================
@@ -1155,6 +1156,22 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
     });
   }
 
+  /// The server refused this patient's records. Offer the consent gate, and
+  /// leave the form as it is so one more press saves it once access is given.
+  Future<void> _askForConsent(String patientId) async {
+    final name = widget.initialAppointmentData?['patient_name']?.toString() ??
+        _selectedPatient?['name']?.toString() ??
+        'This patient';
+    final granted = await showConsentGateDialog(context, {'id': patientId, 'name': name});
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(granted
+          ? 'Access granted. Press save again to record the visit.'
+          : 'Without consent this visit cannot be saved.'),
+      backgroundColor: granted ? const Color(0xFF2E7D32) : Colors.redAccent,
+    ));
+  }
+
   Future<void> _submitRecord() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -1255,10 +1272,12 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
         if (found.isNotEmpty) return; // banner is now on screen
       } catch (e) {
         if (!mounted) return;
-        setState(() {
-          _isCheckingInteractions = false;
-          _checkUnreachable = true;
-        });
+        setState(() => _isCheckingInteractions = false);
+        if (isConsentRequired(e)) {
+          await _askForConsent(patientId);
+          return;
+        }
+        setState(() => _checkUnreachable = true);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -1398,6 +1417,11 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
       );
     } catch (e) {
       if (!mounted) return;
+      if (isConsentRequired(e)) {
+        await _askForConsent(patientId);
+        setState(() => _isSubmitting = false);
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.toString().replaceAll('Exception: ', '')),
@@ -2422,10 +2446,15 @@ class _PatientHistory extends ConsumerWidget {
             padding: EdgeInsets.all(32),
             child: Center(child: CircularProgressIndicator()),
           ),
-          error: (err, _) => Text(
-            err.toString().replaceAll('Exception: ', ''),
-            style: const TextStyle(color: Colors.redAccent),
-          ),
+          error: (err, _) => isConsentRequired(err)
+              ? ConsentGate(
+                  patient: patient,
+                  onGranted: () => ref.invalidate(_patientHistoryProvider(patientId)),
+                )
+              : Text(
+                  err.toString().replaceAll('Exception: ', ''),
+                  style: const TextStyle(color: Colors.redAccent),
+                ),
           data: (records) {
             if (records.isEmpty) {
               return Padding(

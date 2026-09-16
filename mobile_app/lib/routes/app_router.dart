@@ -6,6 +6,7 @@ import '../presentation/screens/auth/otp_verification_screen.dart';
 import '../presentation/screens/auth/patient_registration_screen.dart';
 import '../presentation/screens/auth/staff_application_screen.dart';
 import '../presentation/screens/clinic/clinic_shell.dart';
+import '../presentation/screens/consent/consent_screens.dart';
 import '../presentation/screens/dashboard/dashboard_screen.dart';
 import '../presentation/screens/records/records_screen.dart';
 import '../presentation/screens/records/record_detail_screen.dart';
@@ -120,6 +121,16 @@ final GoRouter appRouter = GoRouter(
           path: '/admin/staff',
           name: 'admin-staff',
           builder: (context, state) => const AdminStaffScreen(),
+        ),
+        GoRoute(
+          path: '/privacy',
+          name: 'privacy',
+          builder: (context, state) => const PrivacyScreen(),
+        ),
+        GoRoute(
+          path: '/admin/audit',
+          name: 'admin-audit',
+          builder: (context, state) => const AccessAuditScreen(),
         ),
         GoRoute(
           path: '/admin/clinics',

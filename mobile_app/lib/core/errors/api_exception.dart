@@ -8,7 +8,11 @@ class ApiException implements Exception {
   final String message;
   final int? statusCode;
 
-  ApiException(this.message, {this.statusCode});
+  /// Machine-readable error from the backend, e.g. 'CONSENT_REQUIRED' on a 403
+  /// from /records (AUTH_RBAC_CONSENT_PLAN.md Phase 7).
+  final String? code;
+
+  ApiException(this.message, {this.statusCode, this.code});
 
   /// Factory constructor to convert a [DioException] into a human-friendly [ApiException].
   factory ApiException.fromDioException(DioException error) {
@@ -38,12 +42,14 @@ class ApiException implements Exception {
 
         // Try extracting user-friendly message from backend JSON response if available
         String? backendMessage;
+        String? backendCode;
         if (data is Map<String, dynamic>) {
           backendMessage = data['message']?.toString();
+          backendCode = data['code']?.toString();
         }
 
         if (backendMessage != null && backendMessage.trim().isNotEmpty) {
-          return ApiException(backendMessage, statusCode: statusCode);
+          return ApiException(backendMessage, statusCode: statusCode, code: backendCode);
         }
 
         // Fallback friendly message based on standard HTTP status codes

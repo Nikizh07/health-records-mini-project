@@ -1,6 +1,6 @@
 # Plan: Registration, RBAC and patient consent
 
-**Status (2026-09-15): Phases 1–3 and 7 done. Phases 4–6 built and tested; their click-throughs in a real browser are pending. Phase 8 not started.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
+**Status (2026-09-16): all 8 phases built. Phases 1–3 and 7 done; Phases 4–6 and 8 are built and tested, with their click-throughs in a real browser pending.** Build one phase at a time. Each phase leaves the app working and ends with its tests passing and a dated note in `MEMORY.md`.
 
 ## Context
 
@@ -341,7 +341,9 @@ Every allowed read of patient data writes a `PatientAccessLog` row.
 
 **Done when:** the tests pass, and a doctor at another clinic gets `CONSENT_REQUIRED` over HTTP.
 
-## Phase 8: Consent UI
+## Phase 8: Consent UI 🟡 built 2026-09-16, user click-through pending
+
+*As built:* all of it lives in one new `presentation/screens/consent/consent_screens.dart` (gate, popup host, privacy screen, audit list) instead of being spread across the doctor, shell, profile and admin screens; `ApiException.code` carries `CONSENT_REQUIRED`; no l10n strings yet (see `MEMORY.md`).
 
 **Goal:** doctors request access in the app, patients answer in a popup or share a code, and everyone can see the history.
 

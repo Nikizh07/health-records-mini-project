@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../providers/auth_provider.dart';
+import '../consent/consent_screens.dart';
 
 /// Wraps every signed-in page.
 /// - Waits for session restore and sends signed-out users to /login
@@ -27,6 +28,7 @@ class ClinicShell extends ConsumerWidget {
     '/doctor/add-record': 'record:write',
     '/doctor/patients': 'patient:lookup', // history inside needs record:read
     '/admin/staff': 'staff:manage',
+    '/admin/audit': 'audit:read',
     '/admin/clinics': 'clinic:update',
   };
 
@@ -45,6 +47,7 @@ class ClinicShell extends ConsumerWidget {
     (Icons.post_add_outlined, 'New visit', '/doctor/add-record'),
     (Icons.person_search_outlined, 'Patients', '/doctor/patients'),
     (Icons.badge_outlined, 'Staff', '/admin/staff'),
+    (Icons.fact_check_outlined, 'Access log', '/admin/audit'),
     (Icons.apartment_outlined, 'Clinics', '/admin/clinics'),
     (Icons.account_circle_outlined, 'Profile', '/profile'),
   ];
@@ -67,7 +70,9 @@ class ClinicShell extends ConsumerWidget {
     }
 
     final role = auth.role;
-    final page = canAccess(path, auth.can) ? child : _AccessRestricted(role: role);
+    var page = canAccess(path, auth.can) ? child : _AccessRestricted(role: role);
+    // Patients answer consent requests wherever they are in the app.
+    if (auth.can('consent:respond')) page = ConsentPopupHost(child: page);
 
     if (auth.can('self:profile') || !isWide(context)) return page;
 

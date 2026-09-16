@@ -225,6 +225,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             else
               _buildPatientProfileCard(profile, phone, healthId, l10n),
 
+            // Consent, share code and access history (patients).
+            if (ref.watch(authNotifierProvider).can('consent:respond')) ...[
+              const SizedBox(height: 20),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.privacy_tip_outlined, color: Color(0xFF006A6A)),
+                  title: const Text('Privacy & access'),
+                  subtitle: const Text('Share code, who can see your history, access log'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/privacy'),
+                ),
+              ),
+            ],
+
             const SizedBox(height: 24),
 
             // Logout & Account Actions

@@ -8,7 +8,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ```
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
-├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, Phases 1-7 built
+├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, all 8 built
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
@@ -123,10 +123,12 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   │   ├── record_service.dart   # records + checkDrugInteractions (pre-flight)
     │   │   ├── admin_service.dart     # clinics
     │   │   ├── staff_service.dart     # /staff: invites, applications, approve/reject/disable
+    │   │   ├── consent_service.dart   # /consents + /audit/access
     │   ├── providers/
     │   │   ├── app_providers.dart, auth_provider.dart, locale_provider.dart
     │   │   ├── appointment_provider.dart, records_provider.dart
     │   │   ├── doctor_provider.dart, admin_provider.dart (clinics, staff list, invites)
+    │   │   ├── consent_provider.dart  # pending requests (10 s poll), one request (3 s), mine, audit
     │   ├── presentation/
     │   │   ├── screens/
     │   │   │   ├── auth/          # login (Patient / Clinic staff tabs), otp_verification, patient_registration,
@@ -138,6 +140,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   │   │   ├── clinic/clinic_shell.dart   # wraps signed-in routes: auth wait, permission gate, permission-filtered staff side nav on wide screens
     │   │   │   ├── doctor/doctor_screens.dart # queue, add visit record, patient lookup;
     │   │   │   │                              # _InteractionBanner = drug conflict warning + override reason
+    │   │   │   ├── consent/consent_screens.dart # ConsentGate (doctor), ConsentPopupHost (patient popup),
+    │   │   │   │                              # PrivacyScreen (/privacy), AccessAuditScreen (/admin/audit)
     │   │   │   ├── reception/reception_screens.dart # front desk pieces used by the queue + lookup screens:
     │   │   │   │                              # register-patient dialog, demographics + walk-in doctor picker, confirm/cancel
     │   │   │   ├── admin/admin_screens.dart   # Staff (applications / staff / invites tabs + invite dialog), manage clinics

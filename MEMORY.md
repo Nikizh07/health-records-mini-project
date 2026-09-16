@@ -35,7 +35,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - ~~Known gap: same-visit pairs don't fire~~ — closed 2026-09-12.
 
 ## Planned: registration, RBAC and patient consent
-- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: Phases 1-3 and 7 done (Phase 7 is API only); Phases 4-6 built and tested (2026-09-15), user click-throughs pending; next is 8 (consent UI).**
+- **Plan (2026-09-13):** `AUTH_RBAC_CONSENT_PLAN.md`. **Status: all 8 phases built. Phases 1-3 and 7 done; Phases 4-6 and 8 built and tested, user click-throughs pending.**
 - Split into 8 phases, one migration per phase (2026-09-13):
   1. identity hardening
   2. roles + permission table
@@ -69,6 +69,15 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-16: Auth/RBAC Phase 8 — consent UI.** App only; the Phase 7 API unchanged.
+  - New `data/services/consent_service.dart`, `providers/consent_provider.dart` (pending poll 10 s, the doctor's own request 3 s) and `presentation/screens/consent/consent_screens.dart` (everything consent, rather than spreading it over doctor/admin/profile screens).
+  - **`ApiException` now carries `code`** from the backend body, so the app can tell a consent refusal from any other 403. `isConsentRequired(error)` is the one check; the gate is shown by `_PatientHistory`, the visit form and the interaction check.
+  - `ConsentGate`: Request access (waiting card polls every 3 s) / Enter share code / Emergency access (reason ≥ 20 chars, red). In the visit form it opens as a dialog; granting says "press save again" rather than replaying the save, so nothing is written twice.
+  - `ConsentPopupHost` wraps every signed-in page for anyone with `consent:respond`, so the Allow/Deny dialog finds the patient wherever they are. It closes with the dialog's own context (the ShellRoute gotcha above).
+  - New `/privacy` (share code, active grants with Revoke, access history) reached from Profile, and `/admin/audit` (Access log) for `audit:read`, in the staff nav and dashboard. Emergency rows are red and tap to show the reason.
+  - **Gotcha:** `pumpAndSettle()` never returns while the waiting card's `CircularProgressIndicator` spins — pump by hand (`pump()`, then `pump(Duration(...))`) in those tests.
+  - No l10n strings: the consent, staff and front-desk screens are English-only, like Phases 4 and 6. The patient-facing popup is the one place worth translating first.
+  - Tests: `flutter test` 23 passed, 2 skipped (gate → request → approve → history loads; share code; emergency reason gate; patient popup; privacy revoke + share code; admin audit list), `flutter analyze` clean. README updated for Phases 6-8.
 - **2026-09-15: Auth/RBAC Phase 7 — consent API.** Backend only.
   - Migration `20260915200000_add_consent`: `consent_requests` (method APP/CODE/EMERGENCY, status PENDING/APPROVED/DENIED/EXPIRED/REVOKED) and `patient_access_logs` (via SELF/CARE/CONSENT/EMERGENCY). **The log also stores `clinic_id`** (the reader's clinic at the time, for the audit list) and `user_id` is a nullable FK with SET NULL, so audit rows outlive a deleted user.
   - `services/patientAccess.js` `resolveAccess(user, patientId)`: SELF → CARE (a record this doctor wrote, or a non-cancelled appointment at the doctor's clinic within ±30 days) → an in-date APPROVED grant (CONSENT, or EMERGENCY by method). Only `record:read` holders with a doctor profile can get past SELF.

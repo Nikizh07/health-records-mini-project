@@ -7,7 +7,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/data/services/admin_service.dart';
+import 'package:mobile_app/core/errors/api_exception.dart';
 import 'package:mobile_app/data/services/appointment_service.dart';
+import 'package:mobile_app/data/services/consent_service.dart';
 import 'package:mobile_app/data/services/auth_service.dart';
 import 'package:mobile_app/data/services/local_cache_service.dart';
 import 'package:mobile_app/data/services/patient_service.dart';
@@ -17,6 +19,7 @@ import 'package:mobile_app/data/services/staff_service.dart';
 import 'package:mobile_app/l10n/generated/app_localizations.dart';
 import 'package:mobile_app/providers/admin_provider.dart';
 import 'package:mobile_app/providers/appointment_provider.dart';
+import 'package:mobile_app/providers/consent_provider.dart';
 import 'package:mobile_app/providers/auth_provider.dart';
 import 'package:mobile_app/providers/records_provider.dart';
 import 'package:mobile_app/routes/app_router.dart';
@@ -113,6 +116,7 @@ class _Records extends RecordService {
   int checkCalls = 0;
   List<Map<String, String>>? checkedPrescriptions;
   int historyCalls = 0;
+  bool consentRequired = false;
 
   @override
   Future<Map<String, dynamic>> checkDrugInteractions({
@@ -135,6 +139,9 @@ class _Records extends RecordService {
     required String patientId,
   }) async {
     historyCalls++;
+    if (consentRequired) {
+      throw ApiException('Ask for consent.', statusCode: 403, code: 'CONSENT_REQUIRED');
+    }
     return List.of(records);
   }
 
@@ -219,6 +226,79 @@ class _Appointments extends AppointmentService {
   }
 }
 
+class _Consents extends ConsentService {
+  _Consents({this.onGrant}) : super(dio: Dio());
+
+  /// What the backend granting access does to the rest of the app.
+  final VoidCallback? onGrant;
+  final calls = <String>[];
+  List<Map<String, dynamic>> pendingList = [];
+  String status = 'PENDING';
+
+  @override
+  Future<Map<String, dynamic>> request({required String idToken, required String patientId}) async {
+    calls.add('request $patientId');
+    return {'id': 'c1', 'status': 'PENDING'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> get({required String idToken, required String consentId}) async {
+    if (status == 'APPROVED') onGrant?.call();
+    return {'id': consentId, 'status': status};
+  }
+
+  @override
+  Future<Map<String, dynamic>> redeem({required String idToken, required String patientId, required String code}) async {
+    calls.add('redeem $code');
+    onGrant?.call();
+    return {'id': 'c2', 'status': 'APPROVED'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> emergency({required String idToken, required String patientId, required String reason}) async {
+    calls.add('emergency $reason');
+    onGrant?.call();
+    return {'id': 'c3', 'status': 'APPROVED'};
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> pending({required String idToken}) async => pendingList;
+
+  @override
+  Future<void> respond({required String idToken, required String consentId, required bool approve}) async =>
+      calls.add('respond $consentId $approve');
+
+  @override
+  Future<Map<String, dynamic>> createShareCode({required String idToken}) async {
+    calls.add('share-code');
+    return {'id': 's1', 'code': '424242'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> mine({required String idToken}) async => {
+        'consents': [
+          {'id': 'g1', 'status': 'APPROVED', 'method': 'APP', 'granted_until': '2099-01-01T00:00:00Z',
+              'doctor': {'name': 'Rao'}, 'clinic': {'name': 'Central Clinic'}},
+        ],
+        'access_log': [
+          {'id': 'l1', 'via': 'EMERGENCY', 'action': 'READ_HISTORY', 'created_at': '2026-09-15T09:00:00Z',
+              'user': {'doctor': {'name': 'Dr. Far', 'clinic': {'name': 'Riverside'}}},
+              'consent': {'reason': 'Unconscious on arrival, need allergy history'}},
+        ],
+      };
+
+  @override
+  Future<void> revoke({required String idToken, required String consentId}) async => calls.add('revoke $consentId');
+
+  @override
+  Future<List<Map<String, dynamic>>> accessAudit({required String idToken}) async => [
+        {'id': 'l1', 'via': 'EMERGENCY', 'action': 'READ_HISTORY', 'created_at': '2026-09-15T09:00:00Z',
+            'user': {'doctor': {'name': 'Dr. Far', 'clinic': {'name': 'Riverside'}}},
+            'patient': {'name': 'Asha Kumari', 'health_id': 'MWH-AB1234'},
+            'consent': {'reason': 'Unconscious on arrival, need allergy history'}},
+      ];
+}
+
 class _Staff extends StaffService {
   _Staff() : super(dio: Dio());
   final actions = <String>[];
@@ -271,6 +351,7 @@ Future<void> _pumpApp(
   _Auth? auth,
   _Patients? patients,
   _Appointments? appointments,
+  _Consents? consents,
   String? token = 'test-token',
   Size size = const Size(1280, 800),
 }) async {
@@ -287,6 +368,7 @@ Future<void> _pumpApp(
       adminServiceProvider.overrideWithValue(_Admin()),
       staffServiceProvider.overrideWithValue(staff ?? _Staff()),
       appointmentServiceProvider.overrideWithValue(appointments ?? _Appointments()),
+      consentServiceProvider.overrideWithValue(consents ?? _Consents()),
     ],
     child: MaterialApp.router(
       routerConfig: appRouter,
@@ -529,6 +611,114 @@ void main() {
     expect(records.checkCalls, 2); // re-checked, not saved against the old verdict
     expect(records.checkedPrescriptions?.first['medicine_name'], 'Cetirizine 10mg');
     expect(records.created?['override_reason'], isNull);
+  });
+
+  /// Doctor lands on a patient whose records the backend refuses until consent.
+  Future<(_Records, _Consents)> openConsentGate(WidgetTester tester) async {
+    final records = _Records()..consentRequired = true;
+    final consents = _Consents(onGrant: () => records.consentRequired = false);
+    await _pumpApp(tester, 'DOCTOR', '/doctor/patients', records: records, consents: consents);
+    await tester.enterText(find.byType(TextField), 'Asha');
+    await tester.tap(find.text('Search'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Asha Kumari'));
+    await tester.pumpAndSettle();
+    expect(find.text('Consent needed'), findsOneWidget);
+    return (records, consents);
+  }
+
+  testWidgets('consent gate: the doctor asks, the patient allows, the history loads', (tester) async {
+    final (records, consents) = await openConsentGate(tester);
+    records.records.add({'id': 'r9', 'diagnosis': 'Old fracture', 'visit_date': '2026-01-02T10:00:00Z',
+        'doctor': {'name': 'Rao'}, 'prescriptions': []});
+
+    // The waiting card spins, so the app never settles: pump by hand.
+    await tester.tap(find.widgetWithText(FilledButton, 'Request access'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(consents.calls, ['request p1']);
+    expect(find.textContaining('Waiting for Asha Kumari'), findsOneWidget);
+    expect(find.text('Old fracture'), findsNothing);
+
+    // The patient taps Allow on their phone; the 3 s poll picks it up.
+    consents.status = 'APPROVED';
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Old fracture'), findsOneWidget);
+    expect(find.text('Consent needed'), findsNothing);
+  });
+
+  testWidgets('consent gate: a share code unlocks the history', (tester) async {
+    final (_, consents) = await openConsentGate(tester);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Enter share code'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '424242');
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Unlock'));
+    await tester.pumpAndSettle();
+
+    expect(consents.calls, ['redeem 424242']);
+    expect(find.text('Consent needed'), findsNothing);
+    expect(find.text('No visits recorded for this patient yet.'), findsOneWidget);
+  });
+
+  testWidgets('consent gate: emergency access needs a real reason', (tester) async {
+    final (_, consents) = await openConsentGate(tester);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Emergency access'));
+    await tester.pumpAndSettle();
+    final open = find.widgetWithText(FilledButton, 'Open records');
+    expect(tester.widget<FilledButton>(open).onPressed, isNull); // empty reason
+    await tester.enterText(find.byType(TextField).last, 'too short');
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(open).onPressed, isNull);
+
+    await tester.enterText(find.byType(TextField).last, 'Unconscious on arrival, need allergy history');
+    await tester.pumpAndSettle();
+    await tester.tap(open);
+    await tester.pumpAndSettle();
+    expect(consents.calls, ['emergency Unconscious on arrival, need allergy history']);
+    expect(find.text('Consent needed'), findsNothing);
+  });
+
+  testWidgets('patient: the popup asks before a doctor sees the history', (tester) async {
+    final consents = _Consents()
+      ..pendingList = [
+        {'id': 'c9', 'doctor': {'name': 'Far'}, 'clinic': {'name': 'Riverside Clinic'}},
+      ];
+    await _pumpApp(tester, 'PATIENT', '/', consents: consents, size: const Size(400, 800));
+
+    expect(find.text('Share your medical history?'), findsOneWidget);
+    expect(find.textContaining('Dr. Far, Riverside Clinic'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Allow'));
+    await tester.pumpAndSettle();
+    expect(consents.calls, ['respond c9 true']);
+  });
+
+  testWidgets('patient: the privacy screen revokes a grant and shows emergency access', (tester) async {
+    final consents = _Consents();
+    await _pumpApp(tester, 'PATIENT', '/privacy', consents: consents, size: const Size(400, 800));
+
+    expect(find.text('Dr. Rao'), findsOneWidget);
+    expect(find.text('EMERGENCY'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Revoke'));
+    await tester.pumpAndSettle();
+    expect(consents.calls, ['revoke g1']);
+
+    await tester.tap(find.text('Create share code'));
+    await tester.pumpAndSettle();
+    expect(find.text('424242'), findsOneWidget);
+  });
+
+  testWidgets('admin: the access log names the patient and the emergency reason', (tester) async {
+    await _pumpApp(tester, 'ADMIN', '/admin/audit');
+    expect(find.text('Access log'), findsWidgets);
+    expect(find.textContaining('Dr. Far → Asha Kumari'), findsOneWidget);
+    await tester.tap(find.byType(ListTile).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Unconscious on arrival, need allergy history'), findsOneWidget);
   });
 
   testWidgets('admin on PC: staff screen approves an application, invite opens as a dialog', (tester) async {

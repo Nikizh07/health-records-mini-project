@@ -27,6 +27,7 @@ This project closes that gap with a **shared, multi-clinic health record system*
 | Patient app (Android + web) | Working |
 | Doctor / admin portal (web, for PC) | Working |
 | Backend API + PostgreSQL | Working, runs locally |
+| Consent and access log | Working: records need a care link, the patient's consent or an audited emergency override |
 | Drug interaction warnings | Working, using a list of 56 known drug pairs |
 | AI-assisted interaction check | Built, off until `AI_*` env vars are set (see `backend/.env.example`); not yet tried with a real model |
 | Cloud deployment | Planned on AWS (RDS, S3, ECS Fargate), see [`AWS_MIGRATION_PLAN.md`](AWS_MIGRATION_PLAN.md). Nothing is deployed yet. |
@@ -42,11 +43,14 @@ This project closes that gap with a **shared, multi-clinic health record system*
 - **Registered at the clinic first?** Staff can register a patient who has no phone app. When that patient later signs in on the same number, they confirm their date of birth and get their existing health ID and history.
 - **Appointments at any clinic**: book, reschedule or cancel. Clinics are listed nearest first.
 - **Health records**: diagnoses, prescriptions, visit notes and attached reports from every clinic in one place
+- **You decide who sees your history**: a doctor outside your care team has to ask. Your phone shows "Dr X, Clinic Y wants to see your medical history for 24 hours" — Allow or Deny. No app to hand? Make a 6-digit share code that works once, for 10 minutes.
+- **Privacy screen**: who can see your history right now, a Revoke button, and a log of every time someone opened your records
 - **Multilingual UI** in English, Hindi and Tamil
 
 **For doctors and clinic staff**
 - **Today's queue**: the doctor's appointments, refreshed every 10 s
-- **Patient lookup** with full history across clinics
+- **Patient lookup**: search your clinic's patients by name, or anyone by exact health ID or phone. The history opens when you have a care link (you wrote a record, or they have an appointment at your clinic within 30 days); otherwise ask for consent, enter their share code, or use emergency access with a written reason (4 hours, flagged to the patient and the clinic).
+- **Front desk (receptionist)**: the clinic queue for every doctor, confirm or cancel bookings, register a new patient and book them a walk-in. Receptionists never see records.
 - **Walk-ins**: create a confirmed appointment for right now and start the visit straight away
 - **Visit form** with diagnosis, notes and prescriptions. Ctrl+Enter saves. Reports can be attached through the API (`POST /api/records/:id/upload`), but the app has no upload screen yet.
 - **Drug interaction warnings**: before a visit is saved, each new prescription is checked against:
@@ -57,6 +61,7 @@ This project closes that gap with a **shared, multi-clinic health record system*
 - **Staff sign-in** with email + password or Google (phone OTP still works). Staff join by an admin's invite, or doctors apply with their registration number and wait for approval.
 - **Admin portal**: manage clinics, invite staff, approve or reject doctor applications, disable accounts
 - **Role-based access** for PATIENT, RECEPTIONIST, DOCTOR, CLINIC_ADMIN and ADMIN, enforced by the backend
+- **Access log**: every staff read or write of a patient's records is recorded, and clinic admins can review it, with emergency access highlighted
 
 ---
 
@@ -224,9 +229,9 @@ cd mobile_app && flutter analyze && flutter test
 ```bash
 cd backend && node scripts/test-interactions.js && node scripts/test-auth-rbac.js
 ```
-- `flutter test` covers the role gate, the doctor/admin screens, staff email sign-in to the pending screen, and the Staff screen. It uses the real router with fake services.
+- `flutter test` covers the role gate, the doctor/admin screens, staff email sign-in to the pending screen, the Staff screen, the front desk, and the consent gate, popup and privacy screen. It uses the real router with fake services.
 - `test-interactions.js` runs 112 drug interaction checks against the real API and database. Firebase and the AI provider are faked, so it needs no device or credentials, and it removes its own test data.
-- `test-auth-rbac.js` covers sign-in and role rules the same way: role from the database only, phone only from the verified token, doctors linked by exact phone, visits saved under the right doctor, guests refused in production.
+- `test-auth-rbac.js` covers sign-in, role and consent rules the same way: role from the database only, phone only from the verified token, a permission × endpoint matrix generated from the permission table, staff invites and applications, desk registration and claim, the front desk, and consent (care link, request, share code, emergency, revoke, access log).
 - `node scripts/test-ai-provider.js` sends one canned case to whichever AI provider `backend/.env` configures and prints the reply.
 
 ---
@@ -246,7 +251,9 @@ There's also a backend image workflow, `.github/workflows/deploy-container`. It 
 ## Known limitations
 
 - Uploaded reports under `/uploads` are served **without authentication**. Anyone with the URL can open them until the move to S3 with signed URLs.
-- Screens poll every 10 s rather than receiving push updates.
+- Screens poll every 10 s rather than receiving push updates, so a consent popup can take that long to appear.
+- The consent and front-desk screens are English-only; the patient app is translated.
+- Emergency access is not reviewed by anyone: it is recorded and shown to the patient and the clinic admin.
 - The doctor queue's date filter uses UTC day boundaries, so bookings before 05:30 IST appear under the previous day.
 
 ---

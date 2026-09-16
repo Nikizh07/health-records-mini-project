@@ -19,6 +19,7 @@ class DashboardScreen extends ConsumerWidget {
     (Icons.person_search_outlined, 'Patient Lookup', 'Find a patient by name or Health ID', '/doctor/patients'),
     (Icons.badge_outlined, 'Staff', 'Invite staff, review doctor applications', '/admin/staff'),
     (Icons.apartment_outlined, 'Manage Clinics', 'Configure clinics, branches and schedules', '/admin/clinics'),
+    (Icons.fact_check_outlined, 'Access Log', 'Who opened which patient record, and why', '/admin/audit'),
   ];
 
   @override
