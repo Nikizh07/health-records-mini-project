@@ -1,6 +1,5 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/utils/poll.dart';
 import '../data/services/consent_service.dart';
 import 'auth_provider.dart';
 
@@ -12,20 +11,20 @@ String _token(Ref ref) {
   return token;
 }
 
-/// Requests waiting for the patient's answer. Polled while a screen watches it.
+/// Requests waiting for the patient's answer. ConsentPopupHost watches this on
+/// every signed-in page, so it is the one poll that is always running — it
+/// stops with the browser tab (schedulePoll).
 /// ponytail: 10 s polling, as the queue does; swap for FCM push if it costs too much.
 final pendingConsentsProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
-  final poll = Timer(const Duration(seconds: 10), ref.invalidateSelf);
-  ref.onDispose(poll.cancel);
+  schedulePoll(ref);
   return ref.watch(consentServiceProvider).pending(idToken: _token(ref));
 });
 
 /// One request the doctor is waiting on. Faster poll: someone is watching it.
 final consentStatusProvider =
     FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, consentId) async {
-  final poll = Timer(const Duration(seconds: 3), ref.invalidateSelf);
-  ref.onDispose(poll.cancel);
+  schedulePoll(ref, const Duration(seconds: 3));
   return ref.watch(consentServiceProvider).get(idToken: _token(ref), consentId: consentId);
 });
 

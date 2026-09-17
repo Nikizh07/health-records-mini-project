@@ -370,7 +370,13 @@ class ConsentPopupHost extends ConsumerStatefulWidget {
 class _ConsentPopupHostState extends ConsumerState<ConsentPopupHost> {
   bool _open = false;
 
+  /// Requests this session has already answered. A poll that was in flight
+  /// while the patient tapped comes back still listing them, and without this
+  /// the popup would open again on a request that is already settled.
+  final _answered = <String>{};
+
   Future<void> _ask(Map<String, dynamic> consent) async {
+    final id = consent['id'].toString();
     _open = true;
     final clinic = (consent['clinic'] as Map?)?['name']?.toString() ?? 'a clinic';
     // Closed with the dialog's own context: under the ShellRoute, this
@@ -390,25 +396,41 @@ class _ConsentPopupHostState extends ConsumerState<ConsentPopupHost> {
         ],
       ),
     );
-    _open = false;
-    if (approve == null || !mounted) return;
+    if (approve == null || !mounted) {
+      _open = false;
+      return;
+    }
+    _answered.add(id);
     try {
       await ref.read(consentServiceProvider).respond(
             idToken: ref.read(authTokenProvider) ?? '',
-            consentId: consent['id'].toString(),
+            consentId: id,
             approve: approve,
           );
     } catch (e) {
+      // It was not recorded, so let the next poll ask again.
+      _answered.remove(id);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_msg(e))));
     }
+    // Only now: until the answer is sent, the request is still pending and a
+    // tick in between would put the same popup straight back up.
+    _open = false;
     ref.invalidate(pendingConsentsProvider);
   }
 
   @override
   Widget build(BuildContext context) {
     ref.listen(pendingConsentsProvider, (_, next) {
-      final waiting = next.valueOrNull ?? const [];
-      if (waiting.isNotEmpty && !_open) _ask(waiting.first);
+      // asData, not valueOrNull: every poll passes through a refreshing state
+      // that still carries the *previous* list, and asking on that reopens the
+      // popup the patient has just answered.
+      final waiting = next.asData?.value ?? const [];
+      if (_open) return;
+      for (final consent in waiting) {
+        if (_answered.contains(consent['id'].toString())) continue;
+        _ask(consent);
+        return;
+      }
     });
     ref.watch(pendingConsentsProvider); // keeps the 10 s poll running
 

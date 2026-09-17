@@ -104,6 +104,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     ├── assets/icons/              # app_icon.png, splash_logo.png
     ├── test/widget_test.dart, clinic_shell_test.dart (permission gate),
     │   clinic_flow_test.dart (doctor/admin screens via real router + fake services),
+    │   poll_test.dart (schedulePoll on a fake clock: ticks, hidden tab, no listener),
     │   interaction_contract_test.dart (client↔API field names; skips without a live backend)
     ├── lib/
     │   ├── main.dart
@@ -115,7 +116,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
     │   │   ├── network/api_client.dart        # shared Dio; refreshes Firebase token per request
     │   │   ├── models/cached_result.dart
     │   │   ├── theme/app_colors.dart, app_theme.dart
-    │   │   └── utils/app_logger.dart
+    │   │   └── utils/app_logger.dart, poll.dart  # schedulePoll(): the one polling
+    │   │                              # clock, paused while the browser tab is hidden
     │   ├── data/services/
     │   │   ├── auth_service.dart      # phone OTP (sign-in or link to a Google/email user), guest, email/password, Google
     │   │   ├── secure_storage_service.dart, local_cache_service.dart

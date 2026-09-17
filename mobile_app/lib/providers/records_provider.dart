@@ -1,7 +1,6 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/models/cached_result.dart';
+import '../core/utils/poll.dart';
 import '../data/services/local_cache_service.dart';
 import '../data/services/record_service.dart';
 import 'auth_provider.dart';
@@ -14,8 +13,7 @@ final recordServiceProvider = Provider<RecordService>((ref) {
 final patientRecordsProvider =
     FutureProvider.autoDispose<CachedResult<List<Map<String, dynamic>>>>((ref) async {
   // ponytail: 10s polling so new doctor records show up; push later if needed.
-  final poll = Timer(const Duration(seconds: 10), ref.invalidateSelf);
-  ref.onDispose(poll.cancel);
+  schedulePoll(ref);
 
   final authState = ref.watch(authNotifierProvider);
   final token = authState.idToken;

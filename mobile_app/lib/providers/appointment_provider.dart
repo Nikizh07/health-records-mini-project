@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import '../core/models/cached_result.dart';
+import '../core/utils/poll.dart';
 import '../data/services/appointment_service.dart';
 import '../data/services/local_cache_service.dart';
 import 'auth_provider.dart';
@@ -126,8 +127,7 @@ final doctorsForClinicProvider =
 final myAppointmentsProvider =
     FutureProvider.autoDispose<CachedResult<List<Map<String, dynamic>>>>((ref) async {
   // ponytail: 10s polling so doctor-side status changes show up; push later if needed.
-  final poll = Timer(const Duration(seconds: 10), ref.invalidateSelf);
-  ref.onDispose(poll.cancel);
+  schedulePoll(ref);
 
   final authState = ref.watch(authNotifierProvider);
   final token = authState.idToken;

@@ -205,13 +205,14 @@ class _Appointments extends AppointmentService {
     String? clinicId,
     String? date,
     String? status,
-  }) async =>
-      [
-        {'id': 'a1', 'status': 'pending', 'slot_time': '2026-09-15T04:30:00Z', 'patient': _patient,
-            'doctor': {'name': 'Dr. Rao'}, 'clinic': {'name': 'Central Clinic'}},
-        {'id': 'a2', 'status': 'confirmed', 'slot_time': '2026-09-15T05:00:00Z', 'patient': _patient,
-            'doctor': {'name': 'Iyer'}, 'clinic': {'name': 'Central Clinic'}},
-      ];
+  }) async {
+    return [
+      {'id': 'a1', 'status': 'pending', 'slot_time': '2026-09-15T04:30:00Z', 'patient': _patient,
+          'doctor': {'name': 'Dr. Rao'}, 'clinic': {'name': 'Central Clinic'}},
+      {'id': 'a2', 'status': 'confirmed', 'slot_time': '2026-09-15T05:00:00Z', 'patient': _patient,
+          'doctor': {'name': 'Iyer'}, 'clinic': {'name': 'Central Clinic'}},
+    ];
+  }
 
   @override
   Future<Map<String, dynamic>> createWalkIn({required String idToken, required String patientId, String? doctorId}) async {
@@ -265,8 +266,11 @@ class _Consents extends ConsentService {
   Future<List<Map<String, dynamic>>> pending({required String idToken}) async => pendingList;
 
   @override
-  Future<void> respond({required String idToken, required String consentId, required bool approve}) async =>
-      calls.add('respond $consentId $approve');
+  Future<void> respond({required String idToken, required String consentId, required bool approve}) async {
+    calls.add('respond $consentId $approve');
+    // As the backend does: an answered request is no longer pending.
+    pendingList = [for (final c in pendingList) if (c['id'] != consentId) c];
+  }
 
   @override
   Future<Map<String, dynamic>> createShareCode({required String idToken}) async {
@@ -695,6 +699,21 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Allow'));
     await tester.pumpAndSettle();
     expect(consents.calls, ['respond c9 true']);
+  });
+
+  testWidgets('patient: answering the popup closes it for good', (tester) async {
+    final consents = _Consents()
+      ..pendingList = [
+        {'id': 'c9', 'doctor': {'name': 'Far'}, 'clinic': {'name': 'Riverside Clinic'}},
+      ];
+    await _pumpApp(tester, 'PATIENT', '/', consents: consents, size: const Size(400, 800));
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Allow'));
+    await tester.pumpAndSettle();
+
+    // The refresh that follows the answer must not ask again with the stale list.
+    expect(consents.calls, ['respond c9 true']);
+    expect(find.text('Share your medical history?'), findsNothing);
   });
 
   testWidgets('patient: the privacy screen revokes a grant and shows emergency access', (tester) async {
