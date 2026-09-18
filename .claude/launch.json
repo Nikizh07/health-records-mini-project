@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "backend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd backend && npm run dev"],
+      "port": 3000
+    },
+    {
       "name": "web",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "cd mobile_app && flutter run -d web-server --web-port 5000 --web-hostname localhost"],

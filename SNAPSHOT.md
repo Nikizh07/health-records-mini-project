@@ -1,6 +1,6 @@
 # Folder Snapshot
 
-Snapshot of the project layout as of 2026-09-13. It leaves out generated/build output (`node_modules/`, `.dart_tool/`, `build/`, `.gradle/`, lockfiles, `ephemeral/`).
+Snapshot of the project layout as of 2026-09-18. It leaves out generated/build output (`node_modules/`, `.dart_tool/`, `build/`, `.gradle/`, lockfiles, `ephemeral/`).
 Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed to one line each.
 
 **Keep this file current:** when files or folders are added, moved or deleted, update the tree below.
@@ -9,6 +9,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
 ├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, all 8 built
+├── ARCHITECTURE.md                # full technical reference: backend pipeline, RBAC, consent, integrations, frontend (2026-09-18)
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
 ├── SNAPSHOT.md                    # this file
