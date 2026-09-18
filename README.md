@@ -212,12 +212,51 @@ Set these in `backend/.env` (template: `backend/.env.example`):
 | `DATABASE_URL` | PostgreSQL connection string, e.g. `postgresql://postgres:<password>@localhost:5432/migrant_clinic_db` |
 | `POSTGRES_PASSWORD` | Password for the Docker Compose database. It must match `DATABASE_URL`. |
 | `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to the Firebase service account key (default `./config/firebase-adminsdk.json`) |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | The key itself, raw JSON or base64. Takes priority over the path. Use it on any host, where the key file is `.dockerignore`d and so absent from the image. |
 | `PORT` | API port (default `3000`) |
 | `NODE_ENV` | `development` or `production` |
 
 `FIREBASE_PROJECT_ID`, `GCS_BUCKET_NAME` and `ALLOWED_ORIGINS` are in the template, but the code doesn't read them yet.
 
 **Keep secrets out of git.** That means `backend/.env` and the Firebase service account key.
+
+---
+
+## Testing a build on a phone (temporary hosted backend)
+
+To install an APK on a phone and use it with no PC, cable or `adb reverse`, the
+app needs a public HTTPS backend. `render.yaml` in the repo root is a Render
+Blueprint that stands one up on the free tier.
+
+1. **Deploy.** Render dashboard → **New** → **Blueprint** → pick this repo. It
+   creates the API and a Postgres database from `render.yaml`, then asks for
+   `FIREBASE_SERVICE_ACCOUNT_JSON` (paste `backend/config/firebase-adminsdk.json`,
+   or its base64) and `FIREBASE_PROJECT_ID`. Migrations run on every boot.
+2. **Seed it.** The new database is empty. From your PC, using the database's
+   *External* connection string (Render → the database → Connections):
+   ```bash
+   cd backend
+   DATABASE_URL='<external-url>' node scripts/seed-nearby-clinics.js
+   DATABASE_URL='<external-url>' node scripts/seed-drug-interactions.js
+   ```
+3. **Build the APK against it.** GitHub → Actions → *Build Android APK* → **Run
+   workflow**, with `api_base_url` = `https://<service>.onrender.com/api`. An
+   HTTPS URL makes it a **release** APK automatically. Download it from the run's
+   artifacts and install it. (Setting the `API_BASE_URL` repository variable does
+   the same for every future push to `main`.)
+
+Free-tier caveats, all of which you will notice while testing:
+
+- The service **sleeps after ~15 minutes idle**. The next request cold-starts it
+  and can take up to a minute, while the app's Dio timeout is 10 s — so the first
+  action after a pause usually fails once and works on retry. Wake it by opening
+  `https://<service>.onrender.com/api/health` in a browser first.
+- The free database **expires 30 days** after creation.
+- There is **no persistent disk**: uploaded reports under `uploads/reports/` are
+  wiped on every deploy and restart. Records and prescriptions are in Postgres
+  and survive; the files do not.
+- `NODE_ENV=production` **refuses anonymous (guest) sign-in**, and a release APK
+  hides the guest button anyway. Sign in with a phone or email account.
 
 ---
 

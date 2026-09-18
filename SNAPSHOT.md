@@ -15,6 +15,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ├── SNAPSHOT.md                    # this file
 ├── README.md                      # project overview, status, setup, testing (rewritten 2026-09-13)
 ├── .claude/launch.json            # local preview servers: web (:5000 debug), web-doctor (:5001 profile build)
+├── render.yaml                    # Render Blueprint: free hosted API + Postgres, for testing an APK
+│                                  # on a phone with no PC. Free-tier caveats in the file header.
 ├── thinking-archive/              # no longer needed day to day; kept for history (moved 2026-09-13)
 │   ├── AI_DRUG_INTERACTION_PLAN.md    # drug conflict detector plan — Phases 1-4 built
 │   ├── DEVLOG.md                  # temporary log of the 2026-09-11 clinic-side/PC work (folded into MEMORY.md)
@@ -40,7 +42,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   ├── config/
 │   │   ├── prisma.js              # PrismaClient singleton (pg Pool adapter) — the real DB client
 │   │   ├── permissions.js         # the one role → permission table + permissionsFor() + outsideOwnClinic()
-│   │   ├── firebase.js            # Firebase Admin init (key file → ADC fallback)
+│   │   ├── firebase.js            # Firebase Admin init: FIREBASE_SERVICE_ACCOUNT_JSON → key file → ADC
 │   │   ├── firebase-adminsdk.json # service account key (gitignored, SECRET)
 │   │   └── db.js                  # UNUSED raw pg Pool (safe to delete)
 │   ├── routes/
