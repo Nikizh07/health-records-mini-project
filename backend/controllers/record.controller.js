@@ -6,13 +6,16 @@
 // 1. POST  /api/records                    — Doctor creates medical record + nested prescriptions (atomic write)
 // 2. GET   /api/records/patient/:patientId — Comprehensive patient history (cross-clinic visibility)
 // 3. GET   /api/records/:id                — Single record details with prescriptions
-// 4. POST  /api/records/:id/upload         — Upload medical report/document (Multer local disk)
+// 4. POST  /api/records/:id/upload         — Upload medical report/document (Multer → private S3)
 // 5. POST  /api/records/interaction-check  — Pre-flight cross-clinic drug interaction check
 // ============================================================
 
 'use strict';
 
+const path = require('path');
+
 const prisma = require('../config/prisma');
+const { putReport, signReport } = require('../config/s3');
 const { checkInteractions } = require('../services/interactionChecker');
 
 // Reusable UUID validator regex (8-4-4-4-12)
@@ -448,7 +451,7 @@ async function getPatientMedicalHistory(req, res, next) {
         language_pref: patient.language_pref,
       },
       count: records.length,
-      data: records,
+      data: await Promise.all(records.map(signReport)),
     });
   } catch (error) {
     console.error('❌ Get Patient Medical History Error:', error);
@@ -493,7 +496,7 @@ async function getMedicalRecordById(req, res, next) {
 
     return res.status(200).json({
       success: true,
-      data: record,
+      data: await signReport(record),
     });
   } catch (error) {
     console.error('❌ Get Medical Record By ID Error:', error);
@@ -506,8 +509,8 @@ async function getMedicalRecordById(req, res, next) {
  * 4. POST /api/records/:id/upload
  * ------------------------------------------------------------
  * Uploads a lab report / document for a specific medical record.
- * - File is uploaded via Multer (stored in uploads/reports)
- * - Updates report_file_url in PostgreSQL
+ * - File is buffered by Multer, then stored in the private S3 bucket
+ * - Stores the S3 *key* in report_file_url; responses carry a presigned URL
  * - Needs report:upload (doctors).
  * ------------------------------------------------------------
  */
@@ -544,29 +547,34 @@ async function uploadReportFile(req, res, next) {
       });
     }
 
-    // Generate relative file URL (accessible via Express static server)
-    const fileUrl = `/uploads/reports/${req.file.filename}`;
+    // Store under a per-record prefix so the IAM policy can scope to reports/*
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const key = `reports/${id}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
 
-    // Update database
+    await putReport(req.file.buffer, key, req.file.mimetype);
+
+    // The DB holds the key; the client gets a short-lived presigned URL.
     const updatedRecord = await prisma.medicalRecord.update({
       where: { id },
       data: {
-        report_file_url: fileUrl,
+        report_file_url: key,
       },
       include: RECORD_INCLUDE,
     });
 
+    const signed = await signReport(updatedRecord);
+
     return res.status(200).json({
       success: true,
       message: 'Medical report uploaded successfully.',
-      file_url: fileUrl,
+      file_url: signed.report_file_url,
       file_info: {
         original_name: req.file.originalname,
-        filename: req.file.filename,
+        filename: key,
         mimetype: req.file.mimetype,
         size_bytes: req.file.size,
       },
-      data: updatedRecord,
+      data: signed,
     });
   } catch (error) {
     console.error('❌ Upload Report Error:', error);

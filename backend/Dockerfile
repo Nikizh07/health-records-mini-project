@@ -35,16 +35,20 @@ RUN DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholde
 # Step 4: Copy the rest of the application source code
 COPY . .
 
-# Step 5: Ensure uploads directory exists and set proper permissions
-RUN mkdir -p /app/uploads/reports && chown -R node:node /app
+# Step 5: RDS CA bundle, so the DATABASE_URL can use sslmode=verify-full
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
 
-# Step 6: Switch to non-root user for security best practices
+# Step 6: Set proper permissions (the CA bundle lands root-owned and 0600)
+RUN chmod 644 /app/certs/rds-global-bundle.pem && chown -R node:node /app
+
+# Step 7: Switch to non-root user for security best practices
 USER node
 
-# Step 7: Expose port and define entrypoint
-# Default to 3000 locally; Cloud Run injects PORT=8080 automatically
+# Step 8: Expose port and define entrypoint
+# ECS injects PORT via the task definition; 3000 is the local default.
 ENV PORT=3000
 EXPOSE 3000
 
-# Start server using the standard start script (node server.js)
-CMD ["npm", "start"]
+# Apply pending migrations, then start the API. `prisma` is already installed
+# in the image (devDependencies), so no extra deploy step is needed.
+CMD ["sh", "-c", "npx prisma migrate deploy && node server.js"]

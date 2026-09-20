@@ -67,7 +67,7 @@ Separation of duties is deliberate: administrative power and clinical data acces
 | ORM | Prisma 7 with the `@prisma/adapter-pg` driver adapter over a `pg` Pool |
 | Database | PostgreSQL 16 |
 | Identity | `firebase-admin` 14 (token verification only) |
-| Uploads | `multer` 2, local disk |
+| Uploads | `multer` 2 in memory → private S3 (`@aws-sdk/client-s3` + `s3-request-presigner`) |
 | Logging | `morgan` (dev only) |
 | Optional | `@aws-sdk/client-bedrock-runtime`, `@aws-sdk/client-sagemaker-runtime` as `optionalDependencies`, lazily required |
 
@@ -94,11 +94,11 @@ Controllers call Prisma directly. Only two things were pulled into `services/`: 
 
 1. `dotenv` first, before anything reads `process.env`
 2. create the Express app
-3. global middleware: `cors()`, `express.json()`, `express.urlencoded()`, static `/uploads`, `morgan` in dev
+3. global middleware: `cors()`, `express.json()`, `express.urlencoded()`, `morgan` in dev
 4. mount `routes/index.js` at `/api`
 5. `notFound` (after routes)
 6. `errorHandler` (last, identified by its 4-argument signature)
-7. listen on `PORT` (default 3000; Cloud Run/ECS inject their own)
+7. listen on `PORT` (default 3000; ECS injects its own via the task definition)
 
 `routes/index.js` is the single place every sub-router is mounted: `/health`, `/protected`, `/patients`, `/clinics`, `/doctors`, `/appointments`, `/records`, `/staff`, `/consents`, `/audit`.
 
@@ -203,7 +203,7 @@ Layer 2 examples: a `DOCTOR` manages only their own schedule (booking a walk-in 
 Two documented sharp edges:
 
 - It **passes through when it cannot identify the patient** (malformed id, no such patient or record) and relies on the controller behind it to answer 400/404. The consequence: the locator must find patients *exactly* as the controller does. The history route accepts a bare health ID as well as a UUID, so the locator does too. Change one without the other and a request slips past the gate.
-- On the upload route it is placed **before multer**, so a refused upload never lands on disk.
+- On the upload route it is placed **before multer**, so a refused upload is never buffered or sent to S3.
 
 `middleware/authorizePatientAccess.js` still exists and is separate: it guards `GET|PUT /patients/:id` demographics, where `patient:lookup` staff are meant to pass. The record routes stopped using it in Phase 2.
 
@@ -307,7 +307,7 @@ Every provider exports `{ name, isConfigured(), complete({system, user}) -> stri
 
 Enums (`Role`, `UserStatus`, `AppointmentStatus`, `ConsentMethod`, `ConsentStatus`, `AccessVia`, `InteractionSeverity`) push a large share of validation into the database.
 
-**Prisma 7 specifics:** the client is a module singleton over a `pg` `Pool` through the `PrismaPg` driver adapter (`config/prisma.js`), and the datasource URL lives in `prisma.config.ts`, **not** in `schema.prisma`. `config/db.js` is an unused raw pool — ignore it.
+**Prisma 7 specifics:** the client is a module singleton over a `pg` `Pool` through the `PrismaPg` driver adapter (`config/prisma.js`), and the datasource URL lives in `prisma.config.ts`, **not** in `schema.prisma`. TLS to RDS comes from `sslmode`/`sslrootcert` in `DATABASE_URL`, which `pg` parses natively — there is no connector code.
 
 Migrations are one per feature phase, applied with `npx prisma migrate deploy`:
 `init_schema`, `add_drug_interactions`, `add_history_indexes`, `add_roles_status`, `add_staff_onboarding`, `add_patient_registered_by`, `add_consent`.
@@ -358,7 +358,7 @@ Every router does `router.use(authenticate)` once at the top, then gates per rou
 
 - **Errors** — controllers throw or `next(err)` with a `statusCode`; `middleware/errorHandler.js` is the single exit, exposing stack traces only outside production.
 - **Response envelopes** — two shapes are in use: controllers answer `{success, data}` / `{success, error, message}`, while the error handler answers `{status, statusCode, message}`. Worth unifying.
-- **Uploads** — `multer` to `uploads/reports/`, 5 MB cap, PDF/PNG/JPG/JPEG/WEBP only, randomized `report-<timestamp>-<random>` filenames. Stored as a relative `report_file_url`, which the app resolves against `API_BASE_URL`.
+- **Uploads** — `multer` buffers in memory (5 MB cap, PDF/PNG/JPG/JPEG/WEBP only), then `config/s3.js` `putReport()` writes to the private bucket under `reports/<recordId>/<timestamp>-<random><ext>`. `report_file_url` holds that **key**; every read path runs the record through `signReport()`, which swaps it for a 15-minute presigned HTTPS URL and leaves `http…` seed values alone.
 - **Health ID** — `utils/healthId.js` generates `MWH-XXXXXX` from crypto-random bytes over an alphabet that excludes `0/O/1/I`, and collision-checks against the DB.
 - **Phone normalisation** — `utils/phone.js` `toE164()` runs on **every** phone before it is stored or matched, with a `+91` default for bare 10-digit numbers. Uniform normalisation is what allowed the old last-10-digits matching hole to be removed.
 - **Singletons** — `config/prisma.js` and `config/firebase.js` initialise once at module load.
@@ -389,16 +389,16 @@ Also: `scripts/test-ai-provider.js` smoke-tests whichever provider `.env` config
 
 | Integration | How it is wired | Failure behaviour |
 |---|---|---|
-| **Firebase Auth** | Client SDK signs in (phone OTP, Google, email/password, anonymous in debug). Backend verifies ID tokens with `firebase-admin`; `config/firebase.js` loads a service-account key file and falls back to Application Default Credentials if it is missing. | Invalid/expired token → 401. **The ADC fallback will fail on AWS** — the key must be injected as `FIREBASE_SERVICE_ACCOUNT_JSON`. |
+| **Firebase Auth** | Client SDK signs in (phone OTP, Google, email/password, anonymous in debug). Backend verifies ID tokens with `firebase-admin`; `config/firebase.js` reads `FIREBASE_SERVICE_ACCOUNT_JSON` (Secrets Manager injects it in production), else the local key file. | Invalid/expired token → 401. With **neither** credential the process **throws at boot** — there is no ADC fallback, since off Google Cloud it could only fail later. |
 | **PostgreSQL** | Prisma 7 client over a `pg` Pool via the `PrismaPg` driver adapter; `DATABASE_URL` from `.env`, configured in `prisma.config.ts`. | A DB error inside `authenticate` is a 500, deliberately not a 401. `/api/health` never touches the DB, so a stopped database only shows up at login. |
 | **LLM provider** | `AI_PROVIDER` selects `openai-compatible` / `bedrock` / `sagemaker`; `AI_*` env vars supply URL, key and model. Prompt from `prompts/drug-interaction.md`. | **Fails open.** Any error → `ai_available: false`, curated table results stand, the save proceeds. |
-| **File storage** | `multer` to local disk, served by `express.static` at `/uploads`. | Planned move to private S3 with presigned URLs (`AWS_MIGRATION_PLAN.md`). |
+| **File storage** | `multer` in memory → private S3 bucket (`S3_BUCKET_NAME`, `AWS_REGION`); reads return 15-minute presigned URLs. Credentials from the AWS chain: ECS task role in production, `AWS_PROFILE` locally. | No bucket configured → uploads throw a clear error and existing records return unsigned. Objects are never public; an unsigned bucket URL is `AccessDenied`. |
 | **Google Sign-In** | Firebase provider; `signInWithPopup` on web, `signInWithProvider` on mobile. Needs an OAuth client, enabled in the Firebase console, and the Android SHA-1/SHA-256 registered. | CI-built APKs are signed with each runner's throwaway debug keystore, so Google sign-in fails on them until a fixed keystore is used. |
 | **Geolocation** | `geolocator` in the app, for nearest-clinic sorting. Clinic coordinates live on the `Clinic` row. | Falls back to unsorted list. |
-| **Docker / GHCR** | `backend/Dockerfile`; `scripts/push-docker-ghcr.ps1` for a manual push. | — |
+| **Docker / ECR / ECS** | `backend/Dockerfile` (RDS CA bundle baked in; starts with `prisma migrate deploy`). `deploy-container.yml` assumes an AWS role over OIDC, pushes to ECR and forces a new ECS deployment. | Until the AWS resources and the `AWS_ROLE_ARN` / `AWS_REGION` / `ECS_CLUSTER` / `ECS_SERVICE` repository settings exist, the deploy job fails; the APK workflow is unaffected. |
 | **Postman** | `backend/postman/` collection + environment, kept in step with each phase. | — |
 
-**Not integrated, despite the branding:** Google Cloud Storage was never implemented, there is no Cloud SQL connector, and nothing auto-deploys to Cloud Run. The code is plain Postgres over `DATABASE_URL` and local disk.
+**Not yet provisioned:** the code targets AWS (RDS, S3, ECS, ECR) as of 2026-09-19, but no AWS account resources exist yet, so the stack still runs locally against Docker Postgres with no bucket configured. `AWS_MIGRATION_PLAN.md` §1 is what remains.
 
 ---
 
@@ -466,14 +466,13 @@ This matters on the server side too: since Phase 8 put the consent popup host on
 
 Ordered by how much they matter.
 
-1. **`/uploads` is served with no authentication.** A medical report URL is public to anyone holding it, which bypasses the entire consent system. Closes with the S3 presigned-URL work in `AWS_MIGRATION_PLAN.md`.
-2. **`cors()` is wide open** with no origin list — fine locally, wrong on a public domain.
-3. **`PUT /patients/:id` lets any `patient:lookup` staff edit any patient's demographics**, not just their own clinic's.
-4. **A receptionist could book a fake appointment to manufacture a care link.** It is visible in the access log; add review if it is abused.
-5. **Two response envelopes** (controllers vs the error handler).
-6. **No invite emails** — an admin has to pass the portal URL along by hand. Needs SES after the AWS move.
-7. **Consent is polling, not push.** Move to FCM if 10 seconds is too slow or too costly.
-8. **Registration numbers are verified by hand** — there is no council registry API.
-9. **Staff-facing screens are English-only.** The patient-facing consent popup is the first thing worth translating.
-10. **No multi-role users** (a clinic admin who is also a doctor) and **no staff MFA** (needs Firebase Identity Platform).
-11. The backend deploy workflow is **missing its `.yml` extension**, so it has never run.
+1. **`cors()` is wide open** with no origin list — fine locally, wrong on a public domain.
+2. **`PUT /patients/:id` lets any `patient:lookup` staff edit any patient's demographics**, not just their own clinic's.
+3. **A receptionist could book a fake appointment to manufacture a care link.** It is visible in the access log; add review if it is abused.
+4. **Two response envelopes** (controllers vs the error handler).
+5. **No invite emails** — an admin has to pass the portal URL along by hand. Needs SES after the AWS move.
+6. **Consent is polling, not push.** Move to FCM if 10 seconds is too slow or too costly.
+7. **Registration numbers are verified by hand** — there is no council registry API.
+8. **Staff-facing screens are English-only.** The patient-facing consent popup is the first thing worth translating.
+9. **No multi-role users** (a clinic admin who is also a doctor) and **no staff MFA** (needs Firebase Identity Platform).
+10. **Presigned report URLs expire after 15 minutes.** A record screen left open longer needs a refresh before the report opens. Accepted for now.

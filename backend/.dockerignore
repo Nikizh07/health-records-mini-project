@@ -15,10 +15,6 @@ service-account*.json
 .gitignore
 *.md
 
-# Ignore local uploaded files
-uploads/*
-!uploads/.gitkeep
-
 # Ignore Docker files themselves
 Dockerfile*
 .dockerignore

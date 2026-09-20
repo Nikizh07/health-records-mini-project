@@ -10,16 +10,18 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - **Auth**: Firebase Auth on the client. The backend verifies Firebase ID tokens with `firebase-admin` (`middleware/authenticate.js`). Roles are PATIENT / RECEPTIONIST / DOCTOR / CLINIC_ADMIN / ADMIN; routes are gated by permission (`config/permissions.js` + `middleware/requirePermission.js`), since 2026-09-15.
 - **Patients** get a health ID in the form `MWH-XXXXXX` (`utils/healthId.js`). Medical history is visible across clinics by design.
 
-## Current infrastructure (as of 2026-09-12)
-- Branded as GCP (Cloud Run / Cloud SQL / GCS), but the code is barely tied to GCP:
-  - DB is plain Postgres via `DATABASE_URL`, with no Cloud SQL connector.
-  - GCS was **never implemented**. Reports are saved to local disk (`backend/uploads/reports/`) and served from `/uploads`.
-  - CI: `.github/workflows/build-apk.yml` builds an Android APK on every push to `main` touching `mobile_app/**`. The backend image workflow is the file `.github/workflows/deploy-container` — **no `.yml` extension, so Actions has never run it**. Nothing auto-deploys either way.
+## Current infrastructure (as of 2026-09-19)
+- The GCP branding is gone; the code now targets AWS, but **nothing is provisioned there yet**, so everything still runs locally.
+  - DB is plain Postgres via `DATABASE_URL` — local Docker today, RDS when the endpoint exists. No code change needed to switch: SSL comes from `sslmode`/`sslrootcert` in the URL, which `pg` parses natively.
+  - Reports go to a private S3 bucket (`config/s3.js`), handed out as 15-minute presigned URLs. Local disk storage and the `/uploads` route are gone.
+  - CI: `.github/workflows/build-apk.yml` builds an Android APK on every push to `main` touching `mobile_app/**`. `.github/workflows/deploy-container.yml` builds the backend image → ECR and forces an ECS deployment on every push touching `backend/**` — it will fail until the AWS resources and the four repository settings exist.
 
 ## In progress: AWS migration
 - **Decision (2026-09-11):** move the DB → RDS Postgres, storage → private S3 with presigned URLs, and the backend → ECS Fargate. **Keep Firebase exactly as is.**
 - Full plan: `AWS_MIGRATION_PLAN.md`.
-- **Status: plan only. No code changes made yet.**
+- **Status (2026-09-19): all the code is done** — §2 (backend), §3 (CI) and §6 (docs) of the plan. See the changelog entry below.
+- **Still to do, and it needs an AWS account — none of it is code:** §1 (VPC/security groups, RDS, the S3 bucket, ECR, Secrets Manager, IAM roles, the Fargate service) and §4 (nothing to migrate: the local DB is seed data and the one test PDF was deleted). Then set the four CI settings (`AWS_ROLE_ARN` secret; `AWS_REGION`, `ECS_CLUSTER`, `ECS_SERVICE` variables) and rebuild the app with the new `API_BASE_URL`.
+- Suggested region stays `ap-south-1` (users are in India, keeps health data in-country).
 
 ## In progress: AI cross-clinic medication conflict detector
 - **Decision (2026-09-12):** warn a doctor at save time when a new prescription conflicts with a drug another clinic already started. Full plan: `thinking-archive/AI_DRUG_INTERACTION_PLAN.md`.
@@ -59,9 +61,8 @@ Cloud-based digital health record and appointment system for migrant worker clin
   - `createMedicalRecord` falls back to `prisma.doctor.findFirst()` for an ADMIN.
 
 ## Known gotchas
-- `backend/config/firebase.js` falls back to Google ADC when the key file is missing. That will fail on AWS, and the key is dockerignored, so it must be injected as the `FIREBASE_SERVICE_ACCOUNT_JSON` secret.
-- `backend/config/db.js` is unused. `config/prisma.js` is the real DB client.
-- `report_file_url` is a relative path (`/uploads/reports/...`). Since 2026-09-11 the app resolves it against `API_BASE_URL`. The backend serves `/uploads` **without auth** — medical files are public to anyone with the URL until the S3 move.
+- `backend/config/firebase.js` **throws at boot** if it finds neither `FIREBASE_SERVICE_ACCOUNT_JSON` (the key's contents) nor the key file. The key is dockerignored, so on AWS the secret is the only route in. The old ADC fallback was removed on 2026-09-19: off Google Cloud it only deferred the failure to the first `verifyIdToken`.
+- `report_file_url` stores an **S3 key**, not a URL. Every read path must pass the record through `signReport()` (`config/s3.js`) or the app receives a raw key it cannot open — a new endpoint returning records is the easy place to forget. Values starting with `http` (seed data) are left alone.
 - All API services must build their client with `createApiClient()` (`mobile_app/lib/core/network/api_client.dart`). It swaps in a fresh Firebase ID token per request; tokens expire after 1 hour.
 - The clinic side targets **Flutter web** for PC use. Linux/Windows desktop builds can't do Firebase phone auth. Release builds refuse a non-HTTPS `API_BASE_URL` (`AppConstants.validateNetworkSecurity`), so test locally with `flutter build web --profile` or `flutter run -d chrome`.
 - The first ADMIN still has to be created with `backend/scripts/set-user-role.js <phone> ADMIN`. The account must have signed in once. Guest accounts are stored with the phone `guest-<uid>`.
@@ -78,6 +79,17 @@ Cloud-based digital health record and appointment system for migrant worker clin
   - **Free-tier caveats worth remembering:** sleeps after ~15 min idle and cold-starts for up to a minute against the app's **10 s Dio timeout**, so the first call after a pause fails once — wake it with `/api/health` first. Free DB expires after 30 days. **No persistent disk: `uploads/reports/` is wiped on every deploy**, so uploaded report files die while the records pointing at them live on. `NODE_ENV=production` refuses guest sign-in.
   - The APK path already existed: Actions → *Build Android APK* → Run workflow with `api_base_url=https://<service>.onrender.com/api`, which auto-selects a **release** build because the URL is HTTPS. No repo change was needed for that.
   - **Noticed, not changed:** `backend/.env` and `backend/config/firebase-adminsdk.json` are **committed to git** — `589ca01 "chore: add env and firebase service account for easy setup"` commented out the `.gitignore` rules. The repo is private so this is not a public leak, and it reads as deliberate, but it contradicts `CLAUDE.md`, and SNAPSHOT/MEMORY still describe the key as "gitignored". Rotating that service-account key and un-committing both files is the safe fix if the repo ever goes public.
+- **2026-09-19: AWS migration — the code half, done.** Plan §2/§3/§6. Nothing is provisioned on AWS yet, so the app still runs entirely locally.
+  - **Reports now go to a private S3 bucket.** New `config/s3.js`: `putReport()` and `signReport()`. `middleware/upload.js` swapped `multer.diskStorage` for `memoryStorage()` (same 5 MB cap, same MIME filter) so nothing touches container disk. `record.controller.js` stores the S3 **key** in `report_file_url` under `reports/<recordId>/<ts>-<rand><ext>` — the per-record prefix is what lets the IAM policy scope to `reports/*` — and signs it on the way out in all three read paths (`getPatientMedicalHistory`, `getMedicalRecordById`, `uploadReportFile`).
+  - **The API contract is unchanged**: `report_file_url` is still a string, but now an absolute HTTPS URL the app can actually open. Before this, uploads returned a relative `/uploads/...` path that the mobile app could not open and that vanished on every container restart. `/uploads` static serving is gone from `server.js`, along with the local `uploads/` folder and its one test PDF.
+  - **Gotcha:** presigned URLs live 15 minutes (`URL_TTL_SECONDS`). A record screen left open longer needs a refresh before the report opens. Accepted.
+  - **Gotcha:** `signReport()` leaves values starting with `http` alone — `scripts/seed-sample-records.js` seeds an absolute dummy PDF URL, and signing that would break it. It also no-ops when `S3_BUCKET_NAME` is unset, so local dev without AWS still reads records fine (uploads throw a clear error instead).
+  - **Firebase credentials:** `config/firebase.js` now reads `FIREBASE_SERVICE_ACCOUNT_JSON` (the key's contents, injected by Secrets Manager) before falling back to the key file for local dev. The **ADC fallback is gone** — off Google Cloud it could only fail later at the first `verifyIdToken`, so it throws at boot instead. Firebase itself is otherwise untouched, as decided.
+  - **Deleted:** `config/db.js` (an unused raw `pg` Pool that duplicated `config/prisma.js`) and `scripts/push-docker-ghcr.ps1`.
+  - **Dockerfile:** bakes in the RDS CA bundle at `/app/certs/rds-global-bundle.pem`, so `DATABASE_URL` can use `sslmode=verify-full`. `CMD` is now `npx prisma migrate deploy && node server.js` — migrations run on every deploy, and `prisma` is already in the image.
+  - **CI:** `.github/workflows/deploy-container` → **`deploy-container.yml`** (it had no extension, so Actions had *never* run it — that is now fixed as a side effect). GHCR is replaced by OIDC → ECR push → `ecs update-service --force-new-deployment`. No long-lived AWS keys in the repo.
+  - **Mobile: no changes needed.** `record_detail_screen.dart` already resolves the URL against the API host and passes absolute URLs straight through.
+  - **Verified:** both regression suites still green (`test-auth-rbac.js` 302, `test-interactions.js` 112); new `scripts/test-s3-signing.js` covers signing offline (4/4); and a throwaway end-to-end run with the S3 `send` intercepted proved the upload PUTs the right key/bucket/content-type/bytes, stores the key in the DB, and returns presigned URLs from upload, `GET /records/:id` and the history — leaving the absolute seed URL alone. The server boots and `/uploads/...` is now a 404. **Not verified:** the Docker image build — the `node:22-slim` pull kept timing out on this network, so the new `ADD` of the RDS CA bundle and the `migrate deploy` CMD are unproven. The bundle URL itself returns 108 certificates. Re-run `docker build -t mcb backend/` before trusting a deploy.
 - **2026-09-18: `ARCHITECTURE.md` added** — one technical reference for the whole project, written from a read of the code rather than from this file. Backend pipeline (`authenticate` → `requirePermission` → `requirePatientAccess` → controller), the three authorization layers, consent flows, staff/patient onboarding, the drug detector and AI layer, data model, full endpoint map with permissions, integrations table, Flutter stack, and a ranked known-gaps list. `README.md` stays the setup guide; this is the "how it works" document.
   - Also recorded there and worth remembering: `cors()` has no origin list, and the two response envelopes (`{success, data}` from controllers vs `{status, statusCode, message}` from `errorHandler`) are inconsistent.
 - **2026-09-17: Web polling made cheaper, and the consent popup stopped repeating.** Follow-up to Phase 8, which made the PC web app feel less smooth.
@@ -268,6 +280,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Test accounts (2026-09-11):
   - **Dr. Default Doctor**: phone `+919999900001`, Firebase test OTP `123456`, clinic "Central Migrant Health Hub". It is a pre-created Doctor row, linked to a user on the first phone login. It needs the number under Firebase console → Auth → Phone → "Phone numbers for testing", and the SMS region policy must allow India. Otherwise login shows "SMS unable to be sent until this region enabled".
   - Older guest doctors: `guest-tjEBbgzUuleqMiAFIuzj0i73rGX2` ("Dr. Test Doctor"), and `guest-15YBX55yHjYATVvWeBkIBARxkIB2` ("Dr. Portal Test"). The second was promoted from a patient, so it can no longer book.
+  - **Test platform ADMIN (2026-09-18): `testadmin@example.com` / `TestAdmin#2026`** — email+password, `emailVerified: true`, created with the Admin SDK (`auth.createUser`) plus `node scripts/set-user-role.js testadmin@example.com ADMIN`. Sign in on the Clinic staff tab. Dev Firebase project only; the address is unroutable (example.com), so no mail ever reaches it.
   - **Platform ADMIN (2026-09-16): `nikizh007@gmail.com`** (Google sign-in). Created by signing in on the staff tab, then `node scripts/set-user-role.js nikizh007@gmail.com ADMIN` — the script made the `users` row from the Firebase account. This is the first admin, so everything else (clinics, staff invites) can now be done in the app.
 - Web test servers (`.claude/launch.json`):
   - `backend` runs `npm run dev` on :3000 (added 2026-09-16, so the API starts with the preview tools instead of a shell).
@@ -279,6 +292,8 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Prefer `test/clinic_flow_test.dart` over browser clicking (2026-09-11). It runs the real router and screens with fake services (the services are built with `Dio()` so no Firebase) and an in-memory cache (`LocalCacheService.init(inMemory: true)`). The save button spins behind the success dialog, so use `pump()` rather than `pumpAndSettle()` after a save.
 - Browser testing Flutter web: it renders to a canvas, so clicks go by coordinates. Viewport emulation breaks click mapping, and focus changes scroll the page, so re-screenshot after every click.
 - Secrets exist locally: `backend/.env` and `backend/config/firebase-adminsdk.json`. Never commit, print or publish them.
+
+- **2026-09-18: one-command local run — `./scripts/dev.sh`.** Starts `backend/docker-compose.yml` with `--wait`, runs `npx prisma migrate deploy`, then the backend (`npm run dev`, :3000) in the background and `flutter run -d web-server` (:5000, `--dart-define=API_BASE_URL=http://localhost:3000/api`) in the foreground; Ctrl+C kills both, the DB container stays up. It first does `docker rm migrant-clinic-db || true` to clear the legacy non-compose container that otherwise blocks the name (data lives in the `migrant_clinic_pgdata` volume). Untested end to end: that `docker rm` was blocked in the session it was written, so compose never came up.
 
 ## User preferences
 - When asked for a plan, save it as a `.md` file in the repo and stop. Only implement when explicitly asked.

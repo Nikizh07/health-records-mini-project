@@ -17,8 +17,6 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 
-const path = require('path');
-
 const apiRoutes = require('./routes/index');
 const notFound = require('./middleware/notFound');
 const errorHandler = require('./middleware/errorHandler');
@@ -33,9 +31,6 @@ app.use(cors());
 // Body parsers — lets Express read JSON and URL-encoded request bodies
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Serve static uploaded files (reports, avatars, documents)
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // HTTP request logger — logs "GET /api/health 200 3ms" style lines in dev
 if (process.env.NODE_ENV !== 'production') {

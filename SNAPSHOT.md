@@ -1,13 +1,13 @@
 # Folder Snapshot
 
-Snapshot of the project layout as of 2026-09-18. It leaves out generated/build output (`node_modules/`, `.dart_tool/`, `build/`, `.gradle/`, lockfiles, `ephemeral/`).
+Snapshot of the project layout as of 2026-09-19. It leaves out generated/build output (`node_modules/`, `.dart_tool/`, `build/`, `.gradle/`, lockfiles, `ephemeral/`).
 Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed to one line each.
 
 **Keep this file current:** when files or folders are added, moved or deleted, update the tree below.
 
 ```
 .
-├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — not implemented yet
+├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — code changes done 2026-09-19; AWS resources not provisioned
 ├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, all 8 built
 ├── ARCHITECTURE.md                # full technical reference: backend pipeline, RBAC, consent, integrations, frontend (2026-09-18)
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
@@ -27,24 +27,29 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   └── doctor-creds.txt           # Firebase test phone + OTP (also in README/MEMORY)
 ├── .github/workflows/
 │   ├── build-apk.yml              # CI: builds an installable Android APK on every push to main
-│   └── deploy-container           # CI: backend image → GHCR. NOTE: no .yml extension, so GitHub never runs it
+│   └── deploy-container.yml       # CI: backend image → ECR (OIDC), then ecs update-service --force-new-deployment
 ├── scripts/
-│   └── push-docker-ghcr.ps1       # manual GHCR push
+│   └── dev.sh                     # run the whole stack locally: DB (docker) → migrations → backend :3000 → Flutter web :5000
 │
 ├── backend/                       # Node.js + Express REST API
-│   ├── server.js                  # entry point; mounts /api, serves /uploads statically
-│   ├── package.json               # express, prisma 7, @prisma/adapter-pg, firebase-admin, multer;
+│   ├── server.js                  # entry point; mounts /api
+│   ├── package.json               # express, prisma 7, @prisma/adapter-pg, firebase-admin, multer,
+│   │                              # @aws-sdk/client-s3 + s3-request-presigner;
 │   │                              # optional @aws-sdk/client-bedrock-runtime + client-sagemaker-runtime
 │   ├── prisma.config.ts           # Prisma 7 config (DATABASE_URL lives here, not in schema)
-│   ├── Dockerfile, .dockerignore  # node:22-slim image; secrets/uploads excluded
+│   ├── Dockerfile, .dockerignore  # node:22-slim; RDS CA bundle baked in; CMD = migrate deploy && node server.js
 │   ├── docker-compose.yml         # local Postgres 16 (migrant-clinic-db, :5432, volume migrant_clinic_pgdata)
 │   ├── .env (local secrets — never commit/print), .env.example, .gitignore
 │   ├── config/
 │   │   ├── prisma.js              # PrismaClient singleton (pg Pool adapter) — the real DB client
 │   │   ├── permissions.js         # the one role → permission table + permissionsFor() + outsideOwnClinic()
+<<<<<<< HEAD
 │   │   ├── firebase.js            # Firebase Admin init: FIREBASE_SERVICE_ACCOUNT_JSON → key file → ADC
+=======
+│   │   ├── firebase.js            # Firebase Admin init (FIREBASE_SERVICE_ACCOUNT_JSON env → key file → throw)
+>>>>>>> d9f9611 (feat(backend): migrate file uploads to AWS S3 and update CI/CD workflow)
 │   │   ├── firebase-adminsdk.json # service account key (gitignored, SECRET)
-│   │   └── db.js                  # UNUSED raw pg Pool (safe to delete)
+│   │   └── s3.js                  # private S3 bucket: putReport() + signReport() (15-min presigned GET)
 │   ├── routes/
 │   │   ├── index.js               # mounts all routers under /api
 │   │   ├── health.routes.js, protected.routes.js
@@ -59,7 +64,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── staff.controller.js    # buildInvite (shared with POST /doctors), acceptInvite (used by /patients/me),
 │   │   │                          # applications, staff list, approve/reject/disable
 │   │   ├── consent.controller.js  # consent flows (§D of AUTH_RBAC_CONSENT_PLAN.md) and the access audit list
-│   │   └── record.controller.js   # medical records, prescriptions, report upload,
+│   │   └── record.controller.js   # medical records, prescriptions, report upload (→ S3 key, signed on read),
 │   │                              # POST /interaction-check (drug conflict pre-flight), and
 │   │                              # createMedicalRecord's check_id / override_reason audit wiring
 │   ├── middleware/
@@ -67,7 +72,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── requirePermission.js   # permission gate (any of the listed permissions)
 │   │   ├── authorizePatientAccess.js  # /patients/:id: self, or patient:lookup for demographics
 │   │   ├── requirePatientAccess.js    # /records gate: care link / consent / emergency, writes patient_access_logs
-│   │   ├── upload.js              # multer local-disk storage, 5 MB, PDF/PNG/JPG/WEBP
+│   │   ├── upload.js              # multer memoryStorage (buffer → S3), 5 MB, PDF/PNG/JPG/WEBP
 │   │   ├── errorHandler.js, notFound.js
 │   ├── prompts/
 │   │   └── drug-interaction.md    # LLM prompt for the AI leg (system / ---USER--- / {{placeholders}})
@@ -96,10 +101,10 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   │                          # HTTP, Firebase stubbed, fake AI provider in-process
 │   │   ├── test-auth-rbac.js      # auth/RBAC regression suite (AUTH_RBAC_CONSENT_PLAN.md), one section per phase;
 │   │   │                          # same stubbed-Firebase harness as test-interactions.js
-│   │   └── test-ai-provider.js    # smoke-tests whichever AI provider .env configures (no DB)
+│   │   ├── test-ai-provider.js    # smoke-tests whichever AI provider .env configures (no DB)
+│   │   └── test-s3-signing.js     # signReport() self-check: key → presigned URL, http/empty passthrough (no DB, no AWS)
 │   ├── postman/                   # API collection + environment (06. Staff Onboarding, 07. Consent & Access)
-│   ├── models/README.md
-│   └── uploads/reports/           # local uploaded reports (1 test PDF)
+│   └── models/README.md
 │
 └── mobile_app/                    # Flutter app
     ├── pubspec.yaml, l10n.yaml, analysis_options.yaml

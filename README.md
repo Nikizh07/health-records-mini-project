@@ -30,7 +30,7 @@ This project closes that gap with a **shared, multi-clinic health record system*
 | Consent and access log | Working: records need a care link, the patient's consent or an audited emergency override |
 | Drug interaction warnings | Working, using a list of 56 known drug pairs |
 | AI-assisted interaction check | Built, off until `AI_*` env vars are set (see `backend/.env.example`); not yet tried with a real model |
-| Cloud deployment | Planned on AWS (RDS, S3, ECS Fargate), see [`AWS_MIGRATION_PLAN.md`](AWS_MIGRATION_PLAN.md). Nothing is deployed yet. |
+| Cloud deployment | Code is AWS-ready (RDS, S3, ECS Fargate, CI to ECR), see [`AWS_MIGRATION_PLAN.md`](AWS_MIGRATION_PLAN.md). The AWS account and its resources are not provisioned yet, so nothing is running in the cloud. |
 | Push notifications | Not built. Screens poll every 10 s instead. |
 
 ---
@@ -73,9 +73,10 @@ This project closes that gap with a **shared, multi-clinic health record system*
 | Backend API | Node.js 22, Express 4 |
 | Database | PostgreSQL 16, Prisma 7 (`@prisma/adapter-pg`) |
 | Authentication | Firebase Authentication (phone OTP for patients; email/password and Google for staff; anonymous guest in test builds), verified server-side with `firebase-admin` |
-| File storage | Local disk via Multer (`backend/uploads/`). Moving to S3 is planned. |
+| File storage | Private Amazon S3 bucket via Multer (in memory) + the AWS SDK. Reports are handed out as 15-minute presigned URLs. |
 | Containers | Docker (backend image, local Postgres via Docker Compose) |
-| CI | GitHub Actions: `flutter analyze` + `flutter test`, and an installable Android APK on every push to `main` |
+| Cloud | AWS: RDS for PostgreSQL, S3 for reports, ECS Fargate for the API, ECR for images |
+| CI | GitHub Actions: `flutter analyze` + `flutter test`, an installable Android APK, and the backend image to ECR → ECS on every push to `main` |
 
 ---
 
@@ -89,8 +90,8 @@ Flutter app (Android / web)
         │
    ┌────┴─────────────┐
    ▼                  ▼
-PostgreSQL      Local uploads
- (Prisma)       (reports)
+PostgreSQL      Private S3 bucket
+(RDS, Prisma)   (reports, presigned URLs)
 ```
 
 The app never talks to the database or storage directly. Every request goes through the API, which handles authorization, validation and business logic.
@@ -212,11 +213,18 @@ Set these in `backend/.env` (template: `backend/.env.example`):
 | `DATABASE_URL` | PostgreSQL connection string, e.g. `postgresql://postgres:<password>@localhost:5432/migrant_clinic_db` |
 | `POSTGRES_PASSWORD` | Password for the Docker Compose database. It must match `DATABASE_URL`. |
 | `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to the Firebase service account key (default `./config/firebase-adminsdk.json`) |
+<<<<<<< HEAD
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | The key itself, raw JSON or base64. Takes priority over the path. Use it on any host, where the key file is `.dockerignore`d and so absent from the image. |
+=======
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | The key's contents instead of a file. Used in production, where Secrets Manager injects it. Takes precedence over the path. |
+| `AWS_REGION` | Region for S3 (and Bedrock/SageMaker, if the AI leg uses them) |
+| `S3_BUCKET_NAME` | Private bucket for uploaded reports. Unset locally, uploads fail and existing records are returned unsigned. |
+>>>>>>> d9f9611 (feat(backend): migrate file uploads to AWS S3 and update CI/CD workflow)
 | `PORT` | API port (default `3000`) |
 | `NODE_ENV` | `development` or `production` |
 
-`FIREBASE_PROJECT_ID`, `GCS_BUCKET_NAME` and `ALLOWED_ORIGINS` are in the template, but the code doesn't read them yet.
+`FIREBASE_PROJECT_ID` and `ALLOWED_ORIGINS` are in the template, but the code doesn't read them yet.
+AWS credentials are never set as variables: locally they come from `AWS_PROFILE`, in production from the ECS task role.
 
 **Keep secrets out of git.** That means `backend/.env` and the Firebase service account key.
 
@@ -272,6 +280,7 @@ cd backend && node scripts/test-interactions.js && node scripts/test-auth-rbac.j
 - `test-interactions.js` runs 112 drug interaction checks against the real API and database. Firebase and the AI provider are faked, so it needs no device or credentials, and it removes its own test data.
 - `test-auth-rbac.js` covers sign-in, role and consent rules the same way: role from the database only, phone only from the verified token, a permission × endpoint matrix generated from the permission table, staff invites and applications, desk registration and claim, the front desk, and consent (care link, request, share code, emergency, revoke, access log).
 - `node scripts/test-ai-provider.js` sends one canned case to whichever AI provider `backend/.env` configures and prints the reply.
+- `node scripts/test-s3-signing.js` checks report URL signing (key → presigned URL, absolute URLs and empty reports left alone). Signing is local, so it needs no bucket and no credentials.
 
 ---
 
@@ -283,13 +292,18 @@ cd backend && node scripts/test-interactions.js && node scripts/test-auth-rbac.j
    - with no `API_BASE_URL` repository variable, a debug APK
    - with an `https://` URL set, a release APK
 
-There's also a backend image workflow, `.github/workflows/deploy-container`. It lacks the `.yml` extension, so GitHub never runs it.
+[`.github/workflows/deploy-container.yml`](.github/workflows/deploy-container.yml) runs on every push to `main` that touches `backend/`:
+1. Assumes an AWS role over OIDC — no long-lived keys in the repository
+2. Builds the backend image and pushes it to ECR, tagged with the commit SHA and `latest`
+3. Forces a new ECS deployment; the container applies pending Prisma migrations before starting
+
+It needs `AWS_ROLE_ARN` as a repository secret, and `AWS_REGION`, `ECS_CLUSTER` and `ECS_SERVICE` as repository variables.
 
 ---
 
 ## Known limitations
 
-- Uploaded reports under `/uploads` are served **without authentication**. Anyone with the URL can open them until the move to S3 with signed URLs.
+- Report URLs are presigned for 15 minutes. A record screen left open longer needs a refresh before the report opens.
 - Screens poll every 10 s rather than receiving push updates, so a consent popup can take that long to appear.
 - The consent and front-desk screens are English-only; the patient app is translated.
 - Emergency access is not reviewed by anyone: it is recorded and shown to the patient and the clinic admin.
@@ -299,7 +313,7 @@ There's also a backend image workflow, `.github/workflows/deploy-container`. It 
 
 ## Cloud computing concepts
 
-This project was built as a **Cloud Computing domain mini project**. The planned AWS deployment is designed to demonstrate:
+This project was built as a **Cloud Computing domain mini project**. The AWS deployment demonstrates:
 
 - **Managed database (DBaaS)**: Amazon RDS for PostgreSQL
 - **Object storage**: private S3 buckets with presigned URLs for medical reports
@@ -312,7 +326,7 @@ This project was built as a **Cloud Computing domain mini project**. The planned
 
 ## Roadmap
 
-- [ ] Deploy to AWS (RDS, S3, ECS Fargate)
+- [ ] Provision the AWS resources and run the first deployment (the code and CI are ready)
 - [ ] AI-assisted drug interaction check alongside the known-pair list
 - [ ] Push notifications for appointment reminders
 - [ ] Offline-first sync for low-connectivity areas

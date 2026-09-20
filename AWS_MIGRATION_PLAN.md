@@ -1,5 +1,16 @@
 # Plan: Move backend, DB and storage from GCP → AWS (Firebase unchanged)
 
+## Status (2026-09-19)
+- ✅ **§2 Backend code** — done and verified locally.
+- ✅ **§3 CI/CD** — done. The workflow also gained the `.yml` extension it was missing, so it will actually run now.
+- ✅ **§5 Mobile** — nothing to change; confirmed the app already passes absolute URLs through.
+- ✅ **§6 Docs** — `README.md`, `ARCHITECTURE.md`, `SNAPSHOT.md`, `MEMORY.md` updated.
+- ⬜ **§1 AWS infrastructure** — needs an AWS account; none of it is code. Do this next.
+- ⬜ **§4 Data migration** — nothing to migrate. The local DB is seed/test data and the single test PDF was deleted with the `uploads/` folder.
+- ⬜ **Verification steps 2-6 below** — they all need live AWS resources. Steps done locally instead: `/api/health` returns 200, `/uploads/...` is now 404, both regression suites pass (302 + 112), `scripts/test-s3-signing.js` passes, and an intercepted end-to-end upload proved the key/bucket/signing wiring. The Docker image build was **not** confirmed — the `node:22-slim` pull kept timing out on this network. The CA-bundle URL the Dockerfile fetches was checked separately and returns 108 certificates. Run `docker build -t mcb backend/` once the network allows.
+
+After §1, set these repository settings for the deploy workflow: secret `AWS_ROLE_ARN`; variables `AWS_REGION`, `ECS_CLUSTER`, `ECS_SERVICE`.
+
 ## Context
 The project is branded as GCP (Cloud Run + Cloud SQL + GCS), but the code is barely tied to GCP:
 - **DB**: plain Postgres via `DATABASE_URL` (Prisma 7 + `@prisma/adapter-pg`) — no Cloud SQL connector.
