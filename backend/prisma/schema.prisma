@@ -223,6 +223,17 @@ model Prescription {
   duration      String
   created_at    DateTime @default(now())
 
+  // ── Structured dose schedule (Phase 1 — Smart Prescriptions) ──────────────
+  // All nullable/defaulted so every existing read path is untouched.
+  // slots: subset of ['MORNING','AFTERNOON','EVENING','NIGHT']
+  slots           String[]  @default([])
+  food_relation   String?   // BEFORE | AFTER | WITH | ANY
+  pills_per_dose  Float?
+  prn             Boolean   @default(false)
+  prn_condition   String?   // e.g. "fever"
+  // Audit trail: who/what set the schedule. Phase 5 refuses to send if null.
+  schedule_source String?   // DOCTOR | AI | PARSED
+
   medical_record MedicalRecord @relation(fields: [record_id], references: [id], onDelete: Cascade)
 
   @@index([record_id])
