@@ -60,7 +60,50 @@ Cloud-based digital health record and appointment system for migrant worker clin
   - Any DOCTOR/ADMIN reads any patient's history.
   - `createMedicalRecord` falls back to `prisma.doctor.findFirst()` for an ADMIN.
 
+## Planned: visual + audio "smart prescriptions" over WhatsApp
+- **Plan (2026-09-21):** `SMART_PRESCRIPTIONS_PLAN.md`. **Status: planned only, nothing built.**
+- The problem: an illiterate patient cannot read the printed slip. Send them voice notes in
+  their language plus a pictogram (sun + pill = morning) over WhatsApp instead.
+- **The crux found while planning:** `Prescription` has exactly three content columns —
+  `medicine_name`, `dosage`, `duration`, all free text. **There is no timing field at all**;
+  "morning and night" exists only as prose inside `dosage`. Everything else follows from that.
+- Decisions:
+  - **Fails closed, unlike the drug checker.** A missed interaction warning still leaves a
+    doctor in the loop; a wrong schedule spoken to an illiterate patient has no literate
+    reader downstream. An unparseable prescription blocks the send rather than being
+    described vaguely.
+  - Schedule is captured **structurally** (nullable columns on `Prescription` + tap-chips on
+    the visit form). The **AI only pre-fills the chips** from what the doctor already typed
+    and may never override a deterministic regex hit.
+  - The **LLM never writes a word the patient hears** — spoken script comes from per-language
+    templates in `backend/messages/`.
+  - The doctor **confirms a preview** (pictogram + the exact sentences + an English gloss)
+    before anything sends.
+  - Pills are identified by **index + colour matched to the chart** ("medicine number one, the
+    blue one"), so chart and audio cannot disagree. No new clinical data needed.
+  - Pictogram is a **deterministic SVG → PNG composer**, never image generation — a model
+    that renders the wrong pill count is a patient-safety bug.
+  - Three new provider layers (`tts`, `messaging`, and the schedule parser) all copy the
+    `services/ai/` registry pattern exactly.
+- **Language gap worth remembering:** registration offers **eight** languages and defaults to
+  **Bengali**, but the app's l10n and this feature cover only en/hi/ta. Chosen behaviour is to
+  fall back to English **and say so in the preview**, never to send the wrong language
+  silently. The 8-language list is duplicated in
+  `patient_registration_screen.dart:22-31` and `reception_screens.dart:61-70` — change both.
+- **Blocked on infrastructure:** Twilio fetches media from a public URL, so the real WhatsApp
+  send needs the S3 bucket that `AWS_MIGRATION_PLAN.md` §1 has not provisioned yet. The `log`
+  provider is the honest demo until then. Meta's Cloud API uploads bytes directly and needs no
+  public URL, so it is the one path that would work without S3.
+- **Unverified:** which Indian-language voices Polly/Google actually ship. Hindi is widely
+  available; **Tamil is the one to check** before picking a provider. Do not assume.
+
 ## Known gotchas
+- **`main` does not boot as committed (found 2026-09-21).** Four files carry unresolved git
+  conflict markers: `backend/config/firebase.js` (a hard SyntaxError — `authenticate` requires
+  it, so every request 500s), `backend/.env.example`, `README.md` and `SNAPSHOT.md`. Check with
+  `grep -rln '^<<<<<<< ' --exclude-dir=node_modules .`. For `.env.example` the `HEAD` side is
+  the dead GCS world; take the S3 side and keep `HEAD`'s better
+  `FIREBASE_SERVICE_ACCOUNT_JSON` comment.
 - `backend/config/firebase.js` **throws at boot** if it finds neither `FIREBASE_SERVICE_ACCOUNT_JSON` (the key's contents) nor the key file. The key is dockerignored, so on AWS the secret is the only route in. The old ADC fallback was removed on 2026-09-19: off Google Cloud it only deferred the failure to the first `verifyIdToken`.
 - `report_file_url` stores an **S3 key**, not a URL. Every read path must pass the record through `signReport()` (`config/s3.js`) or the app receives a raw key it cannot open — a new endpoint returning records is the easy place to forget. Values starting with `http` (seed data) are left alone.
 - All API services must build their client with `createApiClient()` (`mobile_app/lib/core/network/api_client.dart`). It swaps in a fresh Firebase ID token per request; tokens expire after 1 hour.

@@ -9,6 +9,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 .
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — code changes done 2026-09-19; AWS resources not provisioned
 ├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, all 8 built
+├── SMART_PRESCRIPTIONS_PLAN.md    # visual + audio prescriptions over WhatsApp for illiterate
+│                                  # patients — 8 phases (0-7), planned 2026-09-21, none built
 ├── ARCHITECTURE.md                # full technical reference: backend pipeline, RBAC, consent, integrations, frontend (2026-09-18)
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
