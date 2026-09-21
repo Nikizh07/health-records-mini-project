@@ -42,6 +42,18 @@ router.post(
 );
 
 /**
+ * @route   POST /api/records/schedule-parse
+ * @desc    Autofill structured dose-schedule chips from the free text the doctor typed
+ * @access  Private — record:write
+ * @note    Gated by the permission ONLY. It takes no patient_id and reads no
+ *          patient data, so it deliberately skips requirePatientAccess —
+ *          that is what lets the visit form autofill as the doctor types,
+ *          before a patient has even been selected. Declared before '/:id'
+ *          so the literal path is not swallowed by the wildcard.
+ */
+router.post('/schedule-parse', requirePermission('record:write'), recordCtrl.parseDoseSchedules);
+
+/**
  * @route   GET /api/records/patient/:patientId
  * @desc    Get longitudinal medical history for a patient (cross-clinic)
  * @access  Private — self:profile (own) or record:read

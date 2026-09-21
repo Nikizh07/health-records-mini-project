@@ -1,6 +1,6 @@
 # Folder Snapshot
 
-Snapshot of the project layout as of 2026-09-19. It leaves out generated/build output (`node_modules/`, `.dart_tool/`, `build/`, `.gradle/`, lockfiles, `ephemeral/`).
+Snapshot of the project layout as of 2026-09-21. It leaves out generated/build output (`node_modules/`, `.dart_tool/`, `build/`, `.gradle/`, lockfiles, `ephemeral/`).
 Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed to one line each.
 
 **Keep this file current:** when files or folders are added, moved or deleted, update the tree below.
@@ -10,7 +10,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — code changes done 2026-09-19; AWS resources not provisioned
 ├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, all 8 built
 ├── SMART_PRESCRIPTIONS_PLAN.md    # visual + audio prescriptions over WhatsApp for illiterate
-│                                  # patients — 8 phases (0-7), planned 2026-09-21, none built
+│                                  # patients — 8 phases (0-7), planned 2026-09-21; Phases 0-2 built
 ├── ARCHITECTURE.md                # full technical reference: backend pipeline, RBAC, consent, integrations, frontend (2026-09-18)
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
@@ -55,7 +55,8 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── appointment.routes.js
 │   │   ├── staff.routes.js        # /staff: invites, doctor applications, list, approve/reject/disable
 │   │   ├── consent.routes.js      # /consents (request, respond, share code, redeem, emergency, mine, revoke) + /audit/access
-│   │   └── record.routes.js       # records, POST /interaction-check, POST /:id/upload (multer)
+│   │   └── record.routes.js       # records, POST /interaction-check, POST /schedule-parse,
+│   │                              # POST /:id/upload (multer)
 │   ├── controllers/
 │   │   ├── health.controller.js, patient.controller.js (+ desk registration, claim by DOB, lookup), doctor.controller.js
 │   │   ├── clinic.controller.js, appointment.controller.js (+ confirm)
@@ -72,26 +73,37 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── requirePatientAccess.js    # /records gate: care link / consent / emergency, writes patient_access_logs
 │   │   ├── upload.js              # multer memoryStorage (buffer → S3), 5 MB, PDF/PNG/JPG/WEBP
 │   │   ├── errorHandler.js, notFound.js
+│   ├── messages/                  # (Phase 3, not built) per-language patient script templates
 │   ├── prompts/
-│   │   └── drug-interaction.md    # LLM prompt for the AI leg (system / ---USER--- / {{placeholders}})
+│   │   ├── drug-interaction.md    # LLM prompt for the AI leg (system / ---USER--- / {{placeholders}})
+│   │   └── dose-schedule.md       # LLM prompt for the dose-chip autofill; tells the model to
+│   │                              # leave a gap blank rather than guess a slot
 │   ├── services/
 │   │   ├── patientAccess.js       # resolveAccess(user, patientId) → SELF | CARE | CONSENT | EMERGENCY
 │   │   ├── interactionChecker.js  # drug conflict detector: new-vs-active (cross-clinic) AND
 │   │   │                          # new-vs-new in the same visit; curated table + optional AI leg (fails open)
+│   │   ├── doseScheduleParser.js  # free-text dosage → structured dose chips: parseDoseText first,
+│   │   │                          # then an optional AI leg that may ONLY fill the gaps it left
 │   │   └── ai/
 │   │       ├── index.js           # provider registry (AI_PROVIDER), timeout, prompt render, JSON parse
 │   │       └── providers/         # openaiCompatible.js (fetch), bedrock.js, sagemaker.js (lazy AWS SDKs)
 │   ├── prisma/
-│   │   ├── schema.prisma          # + DrugInteraction, InteractionCheck, InteractionSeverity
+│   │   ├── schema.prisma          # + DrugInteraction, InteractionCheck, InteractionSeverity;
+│   │   │                          # Prescription += slots/food_relation/pills_per_dose/prn/
+│   │   │                          # prn_condition/schedule_source (all nullable, additive)
 │   │   └── migrations/            # 20260810170839_init_schema, 20260910082706,
 │   │                              # 20260912122022_add_drug_interactions, 20260912122039_add_history_indexes,
 │   │                              # 20260915000000_add_roles_status, 20260915120000_add_staff_onboarding,
-│   │                              # 20260915180000_add_patient_registered_by, 20260915200000_add_consent
+│   │                              # 20260915180000_add_patient_registered_by, 20260915200000_add_consent,
+│   │                              # 20260921082931_add_dose_schedule
 │   ├── utils/
 │   │   ├── healthId.js            # MWH-XXXXXX health ID generator
 │   │   ├── phone.js               # toE164(): every stored/matched phone goes through it (+91 default)
 │   │   ├── drugName.js            # normalises free-text medicine names for table lookup
-│   │   └── prescriptionWindow.js  # infers whether a prescription is still active
+│   │   ├── prescriptionWindow.js  # infers whether a prescription is still active
+│   │   ├── doseSchedule.js        # parseDoseText(): 1-0-1 / BD / "morning and night" / SOS →
+│   │   │                          # slots + food + pills + prn + days; NONE rather than a guess
+│   │   └── language.js            # resolveLanguage(): any language_pref → en|hi|ta + supported flag
 │   ├── scripts/                   # seed-*.js, seed-test-users.sql, set-user-role.js,
 │   │   │                          # generate-test-token.js, get-test-tokens.js, list-ids.js
 │   │   ├── seed-drug-interactions.js  # 56 curated interaction pairs (idempotent upsert)
@@ -100,7 +112,10 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── test-auth-rbac.js      # auth/RBAC regression suite (AUTH_RBAC_CONSENT_PLAN.md), one section per phase;
 │   │   │                          # same stubbed-Firebase harness as test-interactions.js
 │   │   ├── test-ai-provider.js    # smoke-tests whichever AI provider .env configures (no DB)
-│   │   └── test-s3-signing.js     # signReport() self-check: key → presigned URL, http/empty passthrough (no DB, no AWS)
+│   │   ├── test-s3-signing.js     # signReport() self-check: key → presigned URL, http/empty passthrough (no DB, no AWS)
+│   │   ├── test-dose-schedule.js  # offline: doseSchedule.js + language.js, table-driven (no DB, no network)
+│   │   └── test-schedule-parser.js # offline: doseScheduleParser.js incl. the AI gap-fill clamp,
+│   │                              # against a fake provider on 127.0.0.1 (no DB, no credentials)
 │   ├── postman/                   # API collection + environment (06. Staff Onboarding, 07. Consent & Access)
 │   └── models/README.md
 │

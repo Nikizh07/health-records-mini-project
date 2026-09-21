@@ -61,7 +61,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
   - `createMedicalRecord` falls back to `prisma.doctor.findFirst()` for an ADMIN.
 
 ## Planned: visual + audio "smart prescriptions" over WhatsApp
-- **Plan (2026-09-21):** `SMART_PRESCRIPTIONS_PLAN.md`. **Status: planned only, nothing built.**
+- **Plan (2026-09-21):** `SMART_PRESCRIPTIONS_PLAN.md`. **Status: Phases 0-2 built (backend only). Phases 3-7 not started.**
 - The problem: an illiterate patient cannot read the printed slip. Send them voice notes in
   their language plus a pictogram (sun + pill = morning) over WhatsApp instead.
 - **The crux found while planning:** `Prescription` has exactly three content columns —
@@ -113,6 +113,54 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-21: Smart Prescriptions Phase 2 — the AI autofill leg.** Backend only; nothing patient-facing yet.
+  - New `backend/prompts/dose-schedule.md` (same system / `---USER---` / `{{placeholders}}` convention as
+    `drug-interaction.md`) and `backend/services/doseScheduleParser.js` (`parseSchedules`,
+    `renderSchedulePrompt`), shaped like `interactionChecker.js`.
+  - **The model may only fill gaps, and that is the whole safety story.** `parseDoseText` runs over every
+    row *first*, and that result is the fallback — it exists before the AI is touched. Where the regex
+    filled a field (slots, food, pills, days, PRN) the model's answer for that field is discarded. A row
+    the regex placed keeps `schedule_source: 'PARSED'` even when the model contributes a detail like
+    `food_relation`: the provenance that matters is what decided **when** the patient takes the medicine.
+  - **Two clamps on the model's output**, both mirroring `attributeAiConflicts`: an answer whose `index`
+    is outside the request is dropped (never shifted onto another row), and an answer whose
+    `medicine_name` does not match the row at that index is dropped — that is what stops a hallucinated
+    drug from carrying a schedule into a real prescription. Junk slot names, unknown `food_relation`
+    values and non-positive `pills_per_dose` are dropped field by field.
+  - **An AI-filled row is `schedule_source: 'AI'` and `confidence: 'PARTIAL'`, never `CERTAIN`**, however
+    sure the model sounded. `DOCTOR` is set by the client when a chip is edited by hand; nothing in the
+    backend ever produces it.
+  - **This leg does not "fail open" in the drug-checker sense** — there is nothing to fail open into. An
+    outage simply leaves a row unplaced (`schedule_source: null`), and Phase 5 refuses to send it. The
+    `try/catch` returns the deterministic parse and logs `err.message` only.
+  - `extractJsonObject` is now exported from `services/ai/index.js` (a one-line change) rather than the
+    balanced-brace scanner being copied per feature.
+  - **New `POST /api/records/schedule-parse`**, declared before `/:id` so the literal path is not
+    swallowed. Gated by `requirePermission('record:write')` **only, deliberately not
+    `requirePatientAccess`**: it takes no `patient_id`, reads nothing from the DB and writes no audit
+    row, which is exactly what lets the visit form autofill as the doctor types, before a patient has
+    been selected. **Keep it patient-free** — the moment it touches patient data it needs that gate.
+  - **Contract Phase 6 depends on: exactly one schedule per INPUT row, in order.** A row the client
+    sent with no `medicine_name` comes back blank rather than being dropped, so autofilling chips by
+    index can never shift an answer onto the wrong prescription. (`POST /interaction-check` does drop
+    such rows — it has no per-row response, so it does not have this problem.)
+  - **No new env vars.** It reuses the existing `AI_*` block, so the local `.env` (which sets none)
+    behaves deterministic-only, as it does for the drug checker.
+  - **Deviation from the plan:** the plan's Phase 7 table lists no Phase 2 test script, so the new
+    offline suite is `scripts/test-schedule-parser.js` rather than a section inside
+    `test-dose-schedule.js` — `parseSchedules` is async and that file is deliberately synchronous.
+    Add it to the Phase 7 table when that phase lands.
+  - Verified: `test-schedule-parser.js` 50/50 (fake openai-compatible provider on 127.0.0.1, no DB, no
+    credentials — covers the override clamp, both hallucination clamps, PRN in both directions, and
+    HTTP-500 / unparseable / no-array fallbacks); `test-dose-schedule.js` 76/76; and a throwaway HTTP
+    run against the real Express stack with Firebase stubbed, 10/10 (doctor 200, two schedules in order,
+    `"1 tab twice daily after food"` → MORNING+NIGHT / AFTER / 5 days / PARSED, `"as directed"` →
+    unplaced, missing body 400, patient 403 at the gate, no token 401), fixtures cleaned up.
+    Regressions green: `test-auth-rbac.js` 302/302, `test-interactions.js` 112/112.
+  - `test-auth-rbac.js` needed **no** change: its matrix maps one endpoint per permission and
+    `record:write` already points at `POST /records`. The new route adds no permission.
+  - Not done: no real model has been called against this prompt — same gap as the drug-interaction
+    prompt, which has also only ever seen a fake provider.
 - **2026-09-18: A hosted backend for phone-only testing (`render.yaml`).** Asked for ngrok; ngrok is not possible from a Claude Code web container.
   - **Blocked, not a token problem:** the environment's egress gateway rejects every ngrok host — `bin.equinox.io`, `connect.ngrok-agent.com`, `tunnel.ngrok.com`, `api.ngrok.com` all `connect_rejected` (403), while `github.com` and `storage.googleapis.com` connect fine. The PaaS APIs (`api.render.com`, `api.fly.io`, `backboard.railway.app`) are blocked too, and the container has no inbound ingress and is ephemeral. **So nothing can be hosted or deployed from a web session — only repo-driven deploys the user clicks in a browser.**
   - **`render.yaml` (repo root)** is a Render Blueprint: free web service (Docker, `backend/`) + free Postgres, `healthCheckPath: /api/health`, `dockerCommand: npm run start:deploy`. Deploy is dashboard → New → Blueprint → this repo; it prompts for the two `sync: false` vars.

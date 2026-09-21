@@ -8,6 +8,7 @@
 // 3. GET   /api/records/:id                — Single record details with prescriptions
 // 4. POST  /api/records/:id/upload         — Upload medical report/document (Multer → private S3)
 // 5. POST  /api/records/interaction-check  — Pre-flight cross-clinic drug interaction check
+// 6. POST  /api/records/schedule-parse     — Autofill structured dose chips from the free text (no patient data)
 // ============================================================
 
 'use strict';
@@ -17,6 +18,7 @@ const path = require('path');
 const prisma = require('../config/prisma');
 const { putReport, signReport } = require('../config/s3');
 const { checkInteractions } = require('../services/interactionChecker');
+const { parseSchedules } = require('../services/doseScheduleParser');
 
 // Reusable UUID validator regex (8-4-4-4-12)
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -682,9 +684,61 @@ async function checkDrugInteractions(req, res, next) {
   }
 }
 
+
+/**
+ * ============================================================
+ * POST /api/records/schedule-parse
+ * ------------------------------------------------------------
+ * Turns the free-text dosage/duration a doctor is typing into structured
+ * dose-schedule chips they confirm with a glance (Smart Prescriptions
+ * Phase 2). Deterministic regex first, an optional AI leg filling only the
+ * gaps it leaves.
+ *
+ * Deliberately PATIENT-FREE. It takes no patient_id, reads nothing from the
+ * database and writes no audit row, which is exactly what lets the visit
+ * form autofill as the doctor types — before a patient has been selected —
+ * without going through requirePatientAccess. Keep it that way: the moment
+ * this endpoint touches patient data it needs that gate.
+ *
+ * Body: { prescriptions: [{ medicine_name, dosage, duration }] }
+ *
+ * The response carries exactly one schedule per INPUT row, in the same order
+ * (a row with no medicine name comes back blank rather than being dropped),
+ * so the client can autofill chips by index.
+ * ============================================================
+ */
+async function parseDoseSchedules(req, res, next) {
+  try {
+    const { prescriptions } = req.body || {};
+
+    if (!Array.isArray(prescriptions)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Bad Request',
+        message: 'Field "prescriptions" is required and must be an array.',
+      });
+    }
+
+    const result = await parseSchedules({ prescriptions });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        schedules: result.schedules,
+        ai_available: result.ai_available,
+        ai_provider: result.ai_provider,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Dose Schedule Parse Error:', error);
+    next(error);
+  }
+}
+
 module.exports = {
   createMedicalRecord,
   checkDrugInteractions,
+  parseDoseSchedules,
   getAuthenticatedDoctorId,
   getPatientMedicalHistory,
   getMedicalRecordById,

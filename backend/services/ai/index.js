@@ -186,4 +186,7 @@ module.exports = {
   complete,
   renderPrompt,
   parseConflicts,
+  // Exported for other AI callers (services/doseScheduleParser.js) so the
+  // balanced-brace scanner is written once rather than copied per feature.
+  extractJsonObject,
 };
