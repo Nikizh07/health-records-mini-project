@@ -213,13 +213,9 @@ Set these in `backend/.env` (template: `backend/.env.example`):
 | `DATABASE_URL` | PostgreSQL connection string, e.g. `postgresql://postgres:<password>@localhost:5432/migrant_clinic_db` |
 | `POSTGRES_PASSWORD` | Password for the Docker Compose database. It must match `DATABASE_URL`. |
 | `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to the Firebase service account key (default `./config/firebase-adminsdk.json`) |
-<<<<<<< HEAD
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | The key itself, raw JSON or base64. Takes priority over the path. Use it on any host, where the key file is `.dockerignore`d and so absent from the image. |
-=======
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | The key's contents instead of a file. Used in production, where Secrets Manager injects it. Takes precedence over the path. |
 | `AWS_REGION` | Region for S3 (and Bedrock/SageMaker, if the AI leg uses them) |
 | `S3_BUCKET_NAME` | Private bucket for uploaded reports. Unset locally, uploads fail and existing records are returned unsigned. |
->>>>>>> d9f9611 (feat(backend): migrate file uploads to AWS S3 and update CI/CD workflow)
 | `PORT` | API port (default `3000`) |
 | `NODE_ENV` | `development` or `production` |
 

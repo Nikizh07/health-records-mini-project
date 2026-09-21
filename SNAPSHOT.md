@@ -45,11 +45,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   ├── config/
 │   │   ├── prisma.js              # PrismaClient singleton (pg Pool adapter) — the real DB client
 │   │   ├── permissions.js         # the one role → permission table + permissionsFor() + outsideOwnClinic()
-<<<<<<< HEAD
-│   │   ├── firebase.js            # Firebase Admin init: FIREBASE_SERVICE_ACCOUNT_JSON → key file → ADC
-=======
 │   │   ├── firebase.js            # Firebase Admin init (FIREBASE_SERVICE_ACCOUNT_JSON env → key file → throw)
->>>>>>> d9f9611 (feat(backend): migrate file uploads to AWS S3 and update CI/CD workflow)
 │   │   ├── firebase-adminsdk.json # service account key (gitignored, SECRET)
 │   │   └── s3.js                  # private S3 bucket: putReport() + signReport() (15-min presigned GET)
 │   ├── routes/
