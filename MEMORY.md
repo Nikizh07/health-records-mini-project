@@ -61,7 +61,7 @@ Cloud-based digital health record and appointment system for migrant worker clin
   - `createMedicalRecord` falls back to `prisma.doctor.findFirst()` for an ADMIN.
 
 ## Planned: visual + audio "smart prescriptions" over WhatsApp
-- **Plan (2026-09-21):** `SMART_PRESCRIPTIONS_PLAN.md`. **Status: Phases 0-2 built (backend only). Phases 3-7 not started.**
+- **Plan (2026-09-21):** `SMART_PRESCRIPTIONS_PLAN.md`. **Status: Phases 0-3 built (backend only). Phases 4-7 not started.**
 - The problem: an illiterate patient cannot read the printed slip. Send them voice notes in
   their language plus a pictogram (sun + pill = morning) over WhatsApp instead.
 - **The crux found while planning:** `Prescription` has exactly three content columns —
@@ -113,6 +113,64 @@ Cloud-based digital health record and appointment system for migrant worker clin
 - Screens should rely on `AppTheme` (buttons, inputs, cards, app bars) rather than per-widget `styleFrom` overrides.
 
 ## Changelog
+- **2026-09-22: Rewrote git history to drop all Claude attribution.** `git filter-branch` over all
+  local branches, then a force-push to `origin`. Three things were stripped: `Co-Authored-By: Claude`
+  trailers (12 commits), `Claude-Session:` trailers (7 commits), and 8 commits whose *author* was
+  `Claude <noreply@anthropic.com>` — reattributed to `Nikizh07 <nikizh007@gmail.com>`. File contents
+  are byte-identical to before (verified `git diff` against the pre-rewrite refs); only commit
+  metadata changed, so every SHA on `main` and `clinic-web-portal` is new. Pre-rewrite tips are kept
+  locally at `refs/backup-preclean/<branch>` — delete them once you are satisfied. Anyone else with a
+  clone must re-clone or `git reset --hard origin/<branch>`. `origin/claude/apk-build-pipeline-main-gbo7ak`
+  turned out to be a stale tracking ref (already deleted on GitHub) and was pruned.
+- **2026-09-22: Smart Prescriptions Phase 3 — message composition.** Backend only, fully offline:
+  no DB, no network, no credentials, no new routes. `node backend/scripts/test-patient-message.js`
+  is 172 green assertions; `test-dose-schedule.js` (76), `test-schedule-parser.js` (56) and
+  `test-s3-signing.js` (4) stay green.
+  - New `backend/messages/prescription.{en,hi,ta}.json` — **every sentence a patient hears**.
+    Templates, never LLM output, so a clinician reviews the wording once and it is then identical
+    for every patient.
+  - **Deviation from the plan's illustrative JSON, deliberate:** Hindi and Tamil are written in
+    **Devanagari and Tamil script, not romanised**. The Phase 4 TTS voices read native script;
+    romanised Hindi is pronounced as English and is unusable. The doctor verifies these sentences
+    through the English `gloss` the preview shows beside each one — which is exactly what `gloss`
+    is for. `test-patient-message.js` asserts the script ranges, so this cannot silently regress.
+  - New `backend/services/patientMessage/palette.js` — **not in the plan, and it is the piece that
+    makes the pitch true.** "Medicine number one, the blue one" only works if the chart and the
+    audio agree, so the index → colour assignment is one pure function both `script.js` and
+    `pictogram.js` read. The colour is a LABEL for the row, not a claim about the tablet — the app
+    holds no data about what a pill actually looks like.
+  - New `backend/services/patientMessage/script.js` — `buildScript(record, language)` →
+    `{ language_used, requested_language, supported, segments, blockers, medicines }`. One segment
+    per prescription (each becomes its own voice note in Phase 5), each with a `gloss`.
+  - New `backend/services/patientMessage/pictogram.js` — `buildSvg()` hand-written SVG dose chart
+    (rows = medicines, columns = morning/afternoon/evening/night + a days column) and `rasterise()`
+    → PNG via the **optional** `@resvg/resvg-js`, lazily required like the AWS SDKs in the AI
+    providers. Missing or failing rasteriser returns `null` and the send proceeds with audio +
+    text; the chart is an aid, the audio is the instruction.
+  - **The chart carries no words at all — glyphs and numerals only.** That is the point (the
+    patient cannot read) and it also means the rasteriser never needs a Devanagari or Tamil font
+    installed. A test asserts no alphabetic text ever reaches the SVG.
+  - **Fail closed, enforced here rather than in Phase 5's controller:** a row with no slots and no
+    `prn`, a `prn` row with no condition, a row whose `schedule_source` is still `null`, or a
+    nameless row produces **no segment** and instead lands in `blockers` with a reason
+    (`NO_SCHEDULE` / `PRN_NO_CONDITION` / `NO_SCHEDULE_SOURCE` / `NO_MEDICINE_NAME`). Phase 5 turns
+    a non-empty `blockers` into the 400 `SCHEDULE_INCOMPLETE` the plan specifies.
+  - **Blocked rows keep their position.** A refused row still consumes its number and colour, so
+    dropping it never renumbers the medicines after it — "medicine number three" must mean the same
+    thing before and after a correction.
+  - `render()` **throws** on an unfilled `{{placeholder}}` rather than speaking a literal
+    "{{days}}" at a patient, and a value containing braces is never re-scanned.
+  - Gotcha found while building: the crescent-moon glyph written as a two-arc path renders as an
+    empty circle in resvg depending on how the arc flags resolve. It is now a disc with a second
+    disc masked out — unambiguous. Verified by actually rasterising and looking at the PNG.
+  - Gotcha: `Prescription.slots` is a Postgres array with no ordering guarantee. `script.js` sorts
+    it through `SLOTS` before speaking, or a patient hears "at night and in the morning".
+  - Known gap: a PRN condition outside the small curated `conditions` lexicon (fever, pain,
+    headache, cough, vomiting, loose motion, acidity, itching) is spoken **verbatim in English**
+    inside a Hindi or Tamil sentence. Imperfect but not a dosing error, and the gloss shows the
+    doctor exactly what will be said. Widening the lexicon is the cheap fix.
+  - Deliberately NOT spoken on a PRN row: the day count. "Continue for 5 days" reads as a standing
+    instruction and contradicts "only if".
 - **2026-09-21: Smart Prescriptions Phase 2 — the AI autofill leg.** Backend only; nothing patient-facing yet.
   - New `backend/prompts/dose-schedule.md` (same system / `---USER---` / `{{placeholders}}` convention as
     `drug-interaction.md`) and `backend/services/doseScheduleParser.js` (`parseSchedules`,

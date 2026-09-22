@@ -1,0 +1,63 @@
+{
+  "_comment": "Smart Prescriptions — the spoken script. Templates, never LLM output. Every sentence a patient hears comes from this file, so it is reviewable by a clinician and identical for every patient. Keys must match prescription.hi.json and prescription.ta.json exactly; scripts/test-patient-message.js enforces that.",
+  "language": "en",
+
+  "greeting": "{{name}}, this is your medicine.",
+  "scheduled": "Medicine number {{index}}, the {{colour}} one.",
+  "dose": "Take {{pills}} {{unit}} {{slots}}.",
+  "dose_no_count": "Take this medicine {{slots}}.",
+  "food_clause": "Take it {{food}}.",
+  "days_clause": "Continue for {{days}} days.",
+  "prn": "Medicine number {{index}}, the {{colour}} one. Take it only if you have {{condition}}.",
+  "closing": "If you do not feel better, come back to the clinic.",
+
+  "slot_join": " and ",
+  "slot_separator": ", ",
+
+  "slots": {
+    "MORNING": "in the morning",
+    "AFTERNOON": "in the afternoon",
+    "EVENING": "in the evening",
+    "NIGHT": "at night"
+  },
+
+  "food": {
+    "BEFORE": "before food",
+    "AFTER": "after food",
+    "WITH": "with food",
+    "ANY": "at any time"
+  },
+
+  "colours": {
+    "BLUE": "blue",
+    "RED": "red",
+    "GREEN": "green",
+    "YELLOW": "yellow",
+    "WHITE": "white",
+    "ORANGE": "orange",
+    "PURPLE": "purple",
+    "PINK": "pink"
+  },
+
+  "units": {
+    "one": "tablet",
+    "many": "tablets"
+  },
+
+  "fractions": {
+    "0.5": "half a",
+    "0.25": "a quarter of a"
+  },
+
+  "conditions": {
+    "fever": "fever",
+    "pain": "pain",
+    "headache": "a headache",
+    "cough": "a cough",
+    "vomiting": "vomiting",
+    "loose motion": "loose motions",
+    "diarrhoea": "loose motions",
+    "acidity": "acidity",
+    "itching": "itching"
+  }
+}

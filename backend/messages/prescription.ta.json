@@ -1,0 +1,63 @@
+{
+  "_comment": "Tamil spoken script, in Tamil script for the same reason as the Hindi file. NOTE: Tamil TTS availability is unconfirmed — Phase 4 must check the provider's own voice list. If the chosen provider has no Tamil voice, resolveLanguage degrades ta → en and the preview says so; this file is still what a Tamil voice would read.",
+  "language": "ta",
+
+  "greeting": "{{name}}, இது உங்கள் மருந்து.",
+  "scheduled": "மருந்து எண் {{index}}, {{colour}} நிறமானது.",
+  "dose": "{{slots}} {{pills}} {{unit}} எடுத்துக் கொள்ளுங்கள்.",
+  "dose_no_count": "இந்த மருந்தை {{slots}} எடுத்துக் கொள்ளுங்கள்.",
+  "food_clause": "{{food}} எடுத்துக் கொள்ளுங்கள்.",
+  "days_clause": "{{days}} நாட்களுக்குத் தொடர்ந்து எடுத்துக் கொள்ளுங்கள்.",
+  "prn": "மருந்து எண் {{index}}, {{colour}} நிறமானது. {{condition}} இருந்தால் மட்டும் எடுத்துக் கொள்ளுங்கள்.",
+  "closing": "உடல்நிலை சரியாகவில்லை என்றால் மீண்டும் மருத்துவமனைக்கு வாருங்கள்.",
+
+  "slot_join": ", ",
+  "slot_separator": ", ",
+
+  "slots": {
+    "MORNING": "காலையில்",
+    "AFTERNOON": "மதியம்",
+    "EVENING": "மாலையில்",
+    "NIGHT": "இரவில்"
+  },
+
+  "food": {
+    "BEFORE": "சாப்பாட்டுக்கு முன்",
+    "AFTER": "சாப்பாட்டுக்குப் பிறகு",
+    "WITH": "சாப்பாட்டுடன்",
+    "ANY": "எந்த நேரத்திலும்"
+  },
+
+  "colours": {
+    "BLUE": "நீல",
+    "RED": "சிவப்பு",
+    "GREEN": "பச்சை",
+    "YELLOW": "மஞ்சள்",
+    "WHITE": "வெள்ளை",
+    "ORANGE": "ஆரஞ்சு",
+    "PURPLE": "ஊதா",
+    "PINK": "இளஞ்சிவப்பு"
+  },
+
+  "units": {
+    "one": "மாத்திரை",
+    "many": "மாத்திரைகள்"
+  },
+
+  "fractions": {
+    "0.5": "அரை",
+    "0.25": "கால்"
+  },
+
+  "conditions": {
+    "fever": "காய்ச்சல்",
+    "pain": "வலி",
+    "headache": "தலைவலி",
+    "cough": "இருமல்",
+    "vomiting": "வாந்தி",
+    "loose motion": "வயிற்றுப்போக்கு",
+    "diarrhoea": "வயிற்றுப்போக்கு",
+    "acidity": "அமிலத்தன்மை",
+    "itching": "அரிப்பு"
+  }
+}

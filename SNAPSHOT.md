@@ -10,7 +10,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 ├── AWS_MIGRATION_PLAN.md          # GCP → AWS plan (RDS, S3, ECS) — code changes done 2026-09-19; AWS resources not provisioned
 ├── AUTH_RBAC_CONSENT_PLAN.md      # registration (OTP/email/Google), RBAC roles, patient consent — 8 phases, all 8 built
 ├── SMART_PRESCRIPTIONS_PLAN.md    # visual + audio prescriptions over WhatsApp for illiterate
-│                                  # patients — 8 phases (0-7), planned 2026-09-21; Phases 0-2 built
+│                                  # patients — 8 phases (0-7), planned 2026-09-21; Phases 0-3 built
 ├── ARCHITECTURE.md                # full technical reference: backend pipeline, RBAC, consent, integrations, frontend (2026-09-18)
 ├── CLAUDE.md                      # instructions for Claude (points here + MEMORY.md)
 ├── MEMORY.md                      # project context, decisions, status
@@ -38,6 +38,7 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   ├── package.json               # express, prisma 7, @prisma/adapter-pg, firebase-admin, multer,
 │   │                              # @aws-sdk/client-s3 + s3-request-presigner;
 │   │                              # optional @aws-sdk/client-bedrock-runtime + client-sagemaker-runtime
+│   │                              # + @resvg/resvg-js (SVG→PNG; absent = chart skipped, send proceeds)
 │   ├── prisma.config.ts           # Prisma 7 config (DATABASE_URL lives here, not in schema)
 │   ├── Dockerfile, .dockerignore  # node:22-slim; RDS CA bundle baked in; CMD = migrate deploy && node server.js
 │   ├── docker-compose.yml         # local Postgres 16 (migrant-clinic-db, :5432, volume migrant_clinic_pgdata)
@@ -73,7 +74,9 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── requirePatientAccess.js    # /records gate: care link / consent / emergency, writes patient_access_logs
 │   │   ├── upload.js              # multer memoryStorage (buffer → S3), 5 MB, PDF/PNG/JPG/WEBP
 │   │   ├── errorHandler.js, notFound.js
-│   ├── messages/                  # (Phase 3, not built) per-language patient script templates
+│   ├── messages/                  # the spoken patient script — templates, never LLM output
+│   │   └── prescription.{en,hi,ta}.json   # same key set in all three (enforced by
+│   │                              # test-patient-message.js); hi/ta in native script, not romanised
 │   ├── prompts/
 │   │   ├── drug-interaction.md    # LLM prompt for the AI leg (system / ---USER--- / {{placeholders}})
 │   │   └── dose-schedule.md       # LLM prompt for the dose-chip autofill; tells the model to
@@ -84,6 +87,12 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   │                          # new-vs-new in the same visit; curated table + optional AI leg (fails open)
 │   │   ├── doseScheduleParser.js  # free-text dosage → structured dose chips: parseDoseText first,
 │   │   │                          # then an optional AI leg that may ONLY fill the gaps it left
+│   │   ├── patientMessage/        # Smart Prescriptions Phase 3 — deterministic, no network
+│   │   │   ├── palette.js         # index → colour label; the one assignment chart and audio share
+│   │   │   ├── script.js          # buildScript(record, language) → segments {text, gloss} + blockers
+│   │   │   │                      # (fails closed: an unschedulable row gets no segment)
+│   │   │   └── pictogram.js       # buildSvg() hand-written SVG dose chart (no words, numerals only)
+│   │   │                          # + rasterise() → PNG via the optional @resvg/resvg-js, or null
 │   │   └── ai/
 │   │       ├── index.js           # provider registry (AI_PROVIDER), timeout, prompt render, JSON parse
 │   │       └── providers/         # openaiCompatible.js (fetch), bedrock.js, sagemaker.js (lazy AWS SDKs)
@@ -114,8 +123,10 @@ Platform boilerplate (Flutter android/ios/linux/macos/windows/web) is collapsed 
 │   │   ├── test-ai-provider.js    # smoke-tests whichever AI provider .env configures (no DB)
 │   │   ├── test-s3-signing.js     # signReport() self-check: key → presigned URL, http/empty passthrough (no DB, no AWS)
 │   │   ├── test-dose-schedule.js  # offline: doseSchedule.js + language.js, table-driven (no DB, no network)
-│   │   └── test-schedule-parser.js # offline: doseScheduleParser.js incl. the AI gap-fill clamp,
-│   │                              # against a fake provider on 127.0.0.1 (no DB, no credentials)
+│   │   ├── test-schedule-parser.js # offline: doseScheduleParser.js incl. the AI gap-fill clamp,
+│   │   │                          # against a fake provider on 127.0.0.1 (no DB, no credentials)
+│   │   └── test-patient-message.js # offline: template key parity across en/hi/ta, no unfilled
+│   │                              # {{placeholder}} survives, the fail-closed blockers, the SVG
 │   ├── postman/                   # API collection + environment (06. Staff Onboarding, 07. Consent & Access)
 │   └── models/README.md
 │

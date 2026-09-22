@@ -1,0 +1,63 @@
+{
+  "_comment": "Hindi spoken script. Written in Devanagari, NOT romanised: the TTS voices in Phase 4 read the native script — romanised Hindi is pronounced as English and is unusable. The doctor verifies these sentences through the English `gloss` the preview shows alongside them.",
+  "language": "hi",
+
+  "greeting": "{{name}}, यह आपकी दवाई है।",
+  "scheduled": "दवाई नंबर {{index}}, {{colour}} वाली।",
+  "dose": "{{slots}} {{pills}} {{unit}} लेनी है।",
+  "dose_no_count": "यह दवाई {{slots}} लेनी है।",
+  "food_clause": "{{food}} लें।",
+  "days_clause": "{{days}} दिन तक लेते रहें।",
+  "prn": "दवाई नंबर {{index}}, {{colour}} वाली। यह सिर्फ़ {{condition}} होने पर लें।",
+  "closing": "अगर तबीयत ठीक न लगे तो क्लिनिक वापस आएँ।",
+
+  "slot_join": " और ",
+  "slot_separator": ", ",
+
+  "slots": {
+    "MORNING": "सुबह",
+    "AFTERNOON": "दोपहर",
+    "EVENING": "शाम",
+    "NIGHT": "रात को"
+  },
+
+  "food": {
+    "BEFORE": "खाना खाने से पहले",
+    "AFTER": "खाना खाने के बाद",
+    "WITH": "खाने के साथ",
+    "ANY": "किसी भी समय"
+  },
+
+  "colours": {
+    "BLUE": "नीली",
+    "RED": "लाल",
+    "GREEN": "हरी",
+    "YELLOW": "पीली",
+    "WHITE": "सफ़ेद",
+    "ORANGE": "नारंगी",
+    "PURPLE": "बैंगनी",
+    "PINK": "गुलाबी"
+  },
+
+  "units": {
+    "one": "गोली",
+    "many": "गोलियाँ"
+  },
+
+  "fractions": {
+    "0.5": "आधी",
+    "0.25": "चौथाई"
+  },
+
+  "conditions": {
+    "fever": "बुख़ार",
+    "pain": "दर्द",
+    "headache": "सिर दर्द",
+    "cough": "खाँसी",
+    "vomiting": "उल्टी",
+    "loose motion": "दस्त",
+    "diarrhoea": "दस्त",
+    "acidity": "एसिडिटी",
+    "itching": "खुजली"
+  }
+}
