@@ -194,7 +194,7 @@ jobs:
 
       # ── Optional: decode release keystore ───────────────────────────────
       - name: Set up release signing keystore
-        if: steps.cfg.outputs.mode == 'release' && secrets.KEYSTORE_B64 != ''
+        if: steps.cfg.outputs.mode == 'release' && env.KEYSTORE_B64 != ''
         env:
           KEYSTORE_B64:   ${{ secrets.KEYSTORE_B64 }}
           KEY_ALIAS:      ${{ secrets.KEY_ALIAS }}
