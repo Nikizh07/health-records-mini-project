@@ -1,8 +1,28 @@
 name: Build Android APK
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Triggers
+#   push to main         → builds; publishes a pre-release to GitHub Releases
+#                          when API_BASE_URL is HTTPS (release mode APK).
+#   push of a v* tag     → full release build; always publishes to GitHub
+#                          Releases as a proper (non-pre-release) release.
+#   workflow_dispatch    → manual run with optional overrides.
+#
+# Required repository settings
+#   vars.API_BASE_URL      — HTTPS backend URL baked into the APK
+#                            (Settings › Variables › Actions)
+#   secrets.KEYSTORE_B64   — base-64-encoded release keystore        (optional)
+#   secrets.KEY_ALIAS      — keystore key alias                       (optional)
+#   secrets.KEY_PASSWORD   — key password                             (optional)
+#   secrets.STORE_PASSWORD — store password                           (optional)
+#   (Without the keystore secrets the APK is signed with debug keys —
+#    fine for internal testing, but not for Play Store submission.)
+# ─────────────────────────────────────────────────────────────────────────────
+
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+    tags: ["v*"]
     paths:
       - 'mobile_app/**'
       - '.github/workflows/build-apk.yml'
@@ -13,11 +33,17 @@ on:
         required: false
         default: ''
       build_mode:
-        description: 'auto = release when the API URL is HTTPS, otherwise debug'
+        description: 'Build mode — auto picks release for HTTPS URLs, debug otherwise'
         required: false
         default: 'auto'
         type: choice
-        options: [ auto, debug, release ]
+        options: [auto, debug, release]
+      publish_release:
+        description: 'Publish a GitHub Release (only valid for release builds)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['true', 'false']
 
 concurrency:
   group: build-apk-${{ github.ref }}
@@ -27,9 +53,10 @@ defaults:
   run:
     working-directory: mobile_app
 
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  # Tests run alongside the build so a failing test is visible without
-  # blocking the APK that the team installs on a phone.
+
+  # ── 1. Static analysis & unit tests ──────────────────────────────────────
   test:
     name: Analyze & test
     runs-on: ubuntu-latest
@@ -50,12 +77,27 @@ jobs:
       - name: Test
         run: flutter test
 
+  # ── 2. Build the APK ─────────────────────────────────────────────────────
   build:
     name: Build APK
     runs-on: ubuntu-latest
+    needs: test          # tests must pass before we spend time building
+    permissions:
+      contents: write    # needed to create GitHub Releases & upload assets
+
+    outputs:
+      mode:       ${{ steps.cfg.outputs.mode }}
+      version:    ${{ steps.cfg.outputs.version }}
+      tag:        ${{ steps.cfg.outputs.tag }}
+      apk_name:   ${{ steps.cfg.outputs.apk_name }}
+      do_release: ${{ steps.cfg.outputs.do_release }}
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so we can inspect tags
 
+      # ── Java (required by Gradle) ────────────────────────────────────────
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -66,35 +108,34 @@ jobs:
             mobile_app/android/*.gradle.kts
             mobile_app/android/gradle/wrapper/gradle-wrapper.properties
 
+      # ── Flutter SDK ──────────────────────────────────────────────────────
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - name: Resolve build mode and API URL
+      # ── Resolve build mode, versioning, and release flag ────────────────
+      - name: Resolve config
         id: cfg
         env:
-          INPUT_URL: ${{ github.event.inputs.api_base_url }}
-          VAR_URL: ${{ vars.API_BASE_URL }}
+          INPUT_URL:  ${{ github.event.inputs.api_base_url }}
+          VAR_URL:    ${{ vars.API_BASE_URL }}
           MODE_INPUT: ${{ github.event.inputs.build_mode }}
+          PUB_INPUT:  ${{ github.event.inputs.publish_release }}
         run: |
           set -euo pipefail
-          api_url="${INPUT_URL:-${VAR_URL:-}}"
-          mode="${MODE_INPUT:-auto}"
 
-          # A release build aborts at launch on a non-HTTPS endpoint
-          # (AppConstants.validateNetworkSecurity), so only go release when the
-          # configured URL is HTTPS. Debug builds keep working against
-          # http://localhost:3000/api via `adb reverse tcp:3000 tcp:3000`.
-          case "$api_url" in
-            https://*) secure=true ;;
-            *) secure=false ;;
-          esac
+          # ── API URL ──────────────────────────────────────────────────────
+          api_url="${INPUT_URL:-${VAR_URL:-}}"
+
+          # ── Build mode ───────────────────────────────────────────────────
+          mode="${MODE_INPUT:-auto}"
+          case "$api_url" in https://*) secure=true ;; *) secure=false ;; esac
 
           if [ "$mode" = "auto" ]; then
             if [ "$secure" = true ]; then mode=release; else mode=debug; fi
           elif [ "$mode" = "release" ] && [ "$secure" != true ]; then
-            echo "::error::A release build needs an HTTPS API URL. Set the API_BASE_URL repository variable (Settings > Secrets and variables > Actions > Variables) or pass one to this workflow."
+            echo "::error::A release build requires an HTTPS API URL. Set the API_BASE_URL repository variable or pass it to this workflow."
             exit 1
           fi
 
@@ -103,31 +144,87 @@ jobs:
             echo "::notice::No API_BASE_URL configured; building a debug APK against $api_url."
           fi
 
-          version="$(grep -m1 '^version:' pubspec.yaml | sed 's/^version:[[:space:]]*//' | cut -d'+' -f1)"
+          # ── Version numbers ──────────────────────────────────────────────
+          # pubspec version -> e.g. "1.2.3"
+          pubspec_version="$(grep -m1 '^version:' pubspec.yaml \
+            | sed 's/^version:[[:space:]]*//' | cut -d'+' -f1)"
+
+          # If triggered by a v* tag, use that as the canonical version.
+          ref="${GITHUB_REF:-}"
+          if [[ "$ref" == refs/tags/v* ]]; then
+            tag="${ref#refs/tags/}"
+            version="${tag#v}"
+            # Force release mode for tag pushes
+            mode=release
+          else
+            tag="v${pubspec_version}"
+            version="${pubspec_version}"
+          fi
+
+          build_number="${{ github.run_number }}"
+
+          # ── APK filename ─────────────────────────────────────────────────
+          short_sha="${GITHUB_SHA::7}"
+          apk_name="migrant-health-${mode}-${tag}-build${build_number}-${short_sha}.apk"
+
+          # ── Should we publish a GitHub Release? ──────────────────────────
+          # Publish when:
+          #   a) triggered by a v* tag push, OR
+          #   b) manual dispatch with publish_release=true AND release mode
+          do_release=false
+          if [[ "$ref" == refs/tags/v* ]]; then
+            do_release=true
+          elif [ "${PUB_INPUT:-false}" = "true" ] && [ "$mode" = "release" ]; then
+            do_release=true
+          fi
 
           {
             echo "mode=$mode"
             echo "api_url=$api_url"
             echo "version=$version"
-            echo "apk_name=migrant-health-${mode}-v${version}-${{ github.run_number }}-${GITHUB_SHA::7}.apk"
+            echo "tag=$tag"
+            echo "build_number=$build_number"
+            echo "apk_name=$apk_name"
+            echo "do_release=$do_release"
           } >> "$GITHUB_OUTPUT"
 
+      # ── Flutter dependencies ─────────────────────────────────────────────
       - name: Install dependencies
         run: flutter pub get
 
+      # ── Optional: decode release keystore ───────────────────────────────
+      - name: Set up release signing keystore
+        if: steps.cfg.outputs.mode == 'release' && secrets.KEYSTORE_B64 != ''
+        env:
+          KEYSTORE_B64:   ${{ secrets.KEYSTORE_B64 }}
+          KEY_ALIAS:      ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD:   ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > android/app/release.keystore
+          cat > android/key.properties <<EOF
+          storePassword=${STORE_PASSWORD}
+          keyPassword=${KEY_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          storeFile=release.keystore
+          EOF
+
+      # ── Build ────────────────────────────────────────────────────────────
       - name: Build APK (${{ steps.cfg.outputs.mode }})
         run: |
           flutter build apk --${{ steps.cfg.outputs.mode }} \
             --build-name='${{ steps.cfg.outputs.version }}' \
-            --build-number='${{ github.run_number }}' \
+            --build-number='${{ steps.cfg.outputs.build_number }}' \
             --dart-define=API_BASE_URL='${{ steps.cfg.outputs.api_url }}'
 
+      # ── Rename APK ───────────────────────────────────────────────────────
       - name: Rename APK
         run: |
           mv "build/app/outputs/flutter-apk/app-${{ steps.cfg.outputs.mode }}.apk" \
              "build/app/outputs/flutter-apk/${{ steps.cfg.outputs.apk_name }}"
 
-      - name: Upload APK
+      # ── Always upload as a workflow artifact (30-day retention) ─────────
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: apk-${{ steps.cfg.outputs.mode }}-${{ github.run_number }}
@@ -135,21 +232,54 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # ── Publish to GitHub Releases ───────────────────────────────────────
+      - name: Create / update GitHub Release
+        if: steps.cfg.outputs.do_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.cfg.outputs.tag }}
+          name: "Migrant Health ${{ steps.cfg.outputs.tag }}"
+          body: |
+            ## Migrant Health Android APK — ${{ steps.cfg.outputs.tag }}
+
+            | | |
+            |---|---|
+            | **Build mode** | `${{ steps.cfg.outputs.mode }}` |
+            | **Version** | `${{ steps.cfg.outputs.version }}` |
+            | **Build number** | `${{ steps.cfg.outputs.build_number }}` |
+            | **Commit** | `${{ github.sha }}` |
+            | **API base URL** | `${{ steps.cfg.outputs.api_url }}` |
+
+            ### Install
+            ```bash
+            adb install -r ${{ steps.cfg.outputs.apk_name }}
+            ```
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          files: mobile_app/build/app/outputs/flutter-apk/${{ steps.cfg.outputs.apk_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      # ── Job summary ──────────────────────────────────────────────────────
       - name: Summary
         run: |
           {
             echo "### APK ready"
-            echo
+            echo ""
             echo "| | |"
             echo "|---|---|"
             echo "| File | \`${{ steps.cfg.outputs.apk_name }}\` |"
             echo "| Build mode | \`${{ steps.cfg.outputs.mode }}\` |"
+            echo "| Version | \`${{ steps.cfg.outputs.version }}\` |"
             echo "| API base URL | \`${{ steps.cfg.outputs.api_url }}\` |"
             echo "| Commit | \`${GITHUB_SHA::7}\` |"
-            echo
-            echo "Download it from the **Artifacts** section of this run, then \`adb install -r <file>.apk\`."
+            echo "| GitHub Release | \`${{ steps.cfg.outputs.do_release }}\` |"
+            echo ""
+            echo "Download from the **Artifacts** section or the **Releases** page, then:"
+            echo '```'
+            echo "adb install -r ${{ steps.cfg.outputs.apk_name }}"
+            echo '```'
             if [ "${{ steps.cfg.outputs.mode }}" = "debug" ]; then
-              echo
-              echo "> Debug build: run \`adb reverse tcp:3000 tcp:3000\` so \`${{ steps.cfg.outputs.api_url }}\` reaches your local backend."
+              echo ""
+              echo "> **Debug build**: run \`adb reverse tcp:3000 tcp:3000\` so \`${{ steps.cfg.outputs.api_url }}\` reaches your local backend."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
