@@ -188,6 +188,18 @@ jobs:
             echo "do_release=$do_release"
           } >> "$GITHUB_OUTPUT"
 
+      # ── Decode Firebase google-services.json ────────────────────────────
+      - name: Decode google-services.json
+        env:
+          GOOGLE_SERVICES_B64: ${{ secrets.GOOGLE_SERVICES_B64 }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_B64" ]; then
+            echo "::error::Secret GOOGLE_SERVICES_B64 is not set. Add it under Settings › Secrets › Actions."
+            exit 1
+          fi
+          echo "$GOOGLE_SERVICES_B64" | base64 --decode > android/app/google-services.json
+          echo "::notice::google-services.json written successfully."
+
       # ── Flutter dependencies ─────────────────────────────────────────────
       - name: Install dependencies
         run: flutter pub get
