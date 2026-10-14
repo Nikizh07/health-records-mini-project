@@ -16,6 +16,7 @@ const appointmentRouter = require('./appointment.routes'); // Day 12
 const recordRouter      = require('./record.routes');      // Day 13
 const staffRouter       = require('./staff.routes');       // Auth Phase 3
 const { consentRouter, auditRouter } = require('./consent.routes'); // Auth Phase 7
+const mediaRouter       = require('./media.routes');       // Smart Prescriptions Phase 4
 
 // Mount sub-routers
 router.use('/health',       healthRouter);
@@ -28,5 +29,6 @@ router.use('/records',      recordRouter);      // Day 13: Medical records & pre
 router.use('/staff',        staffRouter);       // invites, doctor applications, approve/reject/disable
 router.use('/consents',     consentRouter);     // consent requests, share codes, emergency access
 router.use('/audit',        auditRouter);       // GET /api/audit/access
+router.use('/media',        mediaRouter);       // public media serving for patient messages (token-authorized)
 
 module.exports = router;

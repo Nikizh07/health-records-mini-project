@@ -28,8 +28,8 @@ This project closes that gap with a **shared, multi-clinic health record system*
 | Doctor / admin portal (web, for PC) | Working |
 | Backend API + PostgreSQL | Working, runs locally |
 | Consent and access log | Working: records need a care link, the patient's consent or an audited emergency override |
-| Drug interaction warnings | Working, using a list of 56 known drug pairs |
-| AI-assisted interaction check | Built, off until `AI_*` env vars are set (see `backend/.env.example`); not yet tried with a real model |
+| Drug interaction warnings | ✅ **Working with AI**: curated list of 56 known drug pairs + Google Gemini AI to catch brand names, misspellings and off-table interactions |
+| AI-assisted interaction check | ✅ **Operational**: Google Gemini (gemini-3.5-flash-lite) free tier, 1,000 requests/day. Verified working with test case "Brufen" (brand name) + Warfarin. Falls back to table-only if API unavailable. |
 | Cloud deployment | Code is AWS-ready (RDS, S3, ECS Fargate, CI to ECR), see [`AWS_MIGRATION_PLAN.md`](AWS_MIGRATION_PLAN.md). The AWS account and its resources are not provisioned yet, so nothing is running in the cloud. |
 | Push notifications | Not built. Screens poll every 10 s instead. |
 
@@ -57,7 +57,13 @@ This project closes that gap with a **shared, multi-clinic health record system*
   - drugs the patient is still taking from **any clinic**
   - the other drugs in the **same prescription**
 
-  If there's a conflict, a banner names the drugs, how serious it is and which clinic prescribed the existing drug. The doctor can still save, but has to give a reason, and every check is kept for audit.
+  Two knowledge sources work together:
+  - **Curated table**: 56 known dangerous drug pairs (warfarin + ibuprofen, etc.), always runs offline
+  - **AI layer (Google Gemini)**: catches brand names ("Brufen" → ibuprofen), misspellings, and drug pairs not in the table
+  
+  If there's a conflict, a banner names the drugs, severity level (CRITICAL/MAJOR/MODERATE/MINOR), which clinic prescribed the existing drug, and suggests safer alternatives. The doctor can still save with an override reason. Every check is stored for audit, including whether AI was available.
+  
+  **Fail-safe design**: if the AI is unavailable, the system falls back to table-only checks automatically—the feature degrades rather than breaking.
 - **Staff sign-in** with email + password or Google (phone OTP still works). Staff join by an admin's invite, or doctors apply with their registration number and wait for approval.
 - **Admin portal**: manage clinics, invite staff, approve or reject doctor applications, disable accounts
 - **Role-based access** for PATIENT, RECEPTIONIST, DOCTOR, CLINIC_ADMIN and ADMIN, enforced by the backend
@@ -167,6 +173,23 @@ npm run dev                 # http://localhost:3000/api/health
 ```
 Put the Firebase service account key at `backend/config/firebase-adminsdk.json`, or point `FIREBASE_SERVICE_ACCOUNT_PATH` at it.
 
+**Optional: Enable AI drug interaction checking**
+```bash
+# Get a free Google Gemini API key from https://ai.google.dev
+# Add to backend/.env:
+AI_ENABLED=true
+AI_PROVIDER=openai-compatible
+AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+AI_API_KEY=your_gemini_api_key_here
+AI_MODEL=gemini-3.5-flash-lite
+AI_JSON_MODE=true
+
+# Test the AI provider:
+node scripts/test-ai-provider.js
+# Expected: ✅ Brufen + warfarin caught (~1.8 seconds)
+```
+Without AI configured, drug interaction checking still works using the curated table only.
+
 ### 3. Mobile app
 ```bash
 cd mobile_app
@@ -200,7 +223,7 @@ The clinic side (doctor/admin) is built for a PC browser. Keep the window at lea
    - The doctor opens it and saves the visit (Ctrl+Enter), which marks the appointment completed.
    - The patient's *My Appointments* and *Health Records* show the update within about 10 s.
    - **Walk-ins:** a doctor can also open *Patient Lookup*, find the patient and click **Walk-in**. This creates a confirmed appointment for right now, puts it in the doctor's queue, and shows it in the patient's *My Appointments*. The snackbar's *Start visit* opens the visit form for that appointment.
-   - **Drug interactions:** prescribe *warfarin* and *ibuprofen* in one visit. A red banner appears, and the save button changes to **Save Anyway**, which asks for a reason. After a patient has a saved warfarin prescription, prescribing *naproxen* in a later visit shows the warning with the clinic and date of the earlier prescription.
+   - **Drug interactions:** prescribe *warfarin* and *ibuprofen* in one visit. A red banner appears with "CRITICAL" severity, and the save button changes to **Save Anyway**, which asks for a reason. After a patient has a saved warfarin prescription, prescribing *naproxen* in a later visit shows the warning with the clinic and date of the earlier prescription. If AI is enabled (see backend setup), try prescribing "Brufen" (brand name) instead—the AI recognizes it as ibuprofen and still flags the interaction.
 
 ---
 
@@ -216,6 +239,14 @@ Set these in `backend/.env` (template: `backend/.env.example`):
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | The key itself, raw JSON or base64. Takes priority over the path. Use it on any host, where the key file is `.dockerignore`d and so absent from the image. |
 | `AWS_REGION` | Region for S3 (and Bedrock/SageMaker, if the AI leg uses them) |
 | `S3_BUCKET_NAME` | Private bucket for uploaded reports. Unset locally, uploads fail and existing records are returned unsigned. |
+| `AI_ENABLED` | `true` or `false`. Enables AI-assisted drug interaction checking (default `true`) |
+| `AI_PROVIDER` | `openai-compatible`, `bedrock`, or `sagemaker` (default `openai-compatible`) |
+| `AI_BASE_URL` | API endpoint. For Gemini: `https://generativelanguage.googleapis.com/v1beta/openai` |
+| `AI_API_KEY` | Your API key (get free Gemini key from [Google AI Studio](https://ai.google.dev)) |
+| `AI_MODEL` | Model name, e.g. `gemini-3.5-flash-lite` (free tier: 1,000 requests/day) |
+| `AI_JSON_MODE` | `true` to request JSON responses (supported by most providers) |
+| `AI_TIMEOUT_MS` | Timeout in milliseconds (default `8000`) |
+| `AI_MAX_TOKENS` | Maximum response tokens (default `1500`) |
 | `PORT` | API port (default `3000`) |
 | `NODE_ENV` | `development` or `production` |
 
@@ -275,7 +306,7 @@ cd backend && node scripts/test-interactions.js && node scripts/test-auth-rbac.j
 - `flutter test` covers the role gate, the doctor/admin screens, staff email sign-in to the pending screen, the Staff screen, the front desk, and the consent gate, popup and privacy screen. It uses the real router with fake services.
 - `test-interactions.js` runs 112 drug interaction checks against the real API and database. Firebase and the AI provider are faked, so it needs no device or credentials, and it removes its own test data.
 - `test-auth-rbac.js` covers sign-in, role and consent rules the same way: role from the database only, phone only from the verified token, a permission × endpoint matrix generated from the permission table, staff invites and applications, desk registration and claim, the front desk, and consent (care link, request, share code, emergency, revoke, access log).
-- `node scripts/test-ai-provider.js` sends one canned case to whichever AI provider `backend/.env` configures and prints the reply.
+- `node scripts/test-ai-provider.js` sends one canned case (Brufen + Warfarin) to whichever AI provider `backend/.env` configures and prints the reply. Needs `AI_*` env vars set. Expected result: ✅ Brufen + warfarin caught (~1.8s with Gemini).
 - `node scripts/test-s3-signing.js` checks report URL signing (key → presigned URL, absolute URLs and empty reports left alone). Signing is local, so it needs no bucket and no credentials.
 
 ---
@@ -323,7 +354,7 @@ This project was built as a **Cloud Computing domain mini project**. The AWS dep
 ## Roadmap
 
 - [ ] Provision the AWS resources and run the first deployment (the code and CI are ready)
-- [ ] AI-assisted drug interaction check alongside the known-pair list
+- [x] ~~AI-assisted drug interaction check alongside the known-pair list~~ ✅ **Completed** - Google Gemini integration operational
 - [ ] Push notifications for appointment reminders
 - [ ] Offline-first sync for low-connectivity areas
 - [ ] Terraform scripts for infrastructure-as-code

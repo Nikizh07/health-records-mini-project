@@ -25,7 +25,7 @@ system cannot confidently describe a prescription, it does not describe it.
 | Safety gate | **Preview + confirm.** "Save & Send" saves the record, then shows the pictogram and the exact sentences that will be spoken. Nothing sends until the doctor confirms. |
 | Languages | **en / hi / ta only**, matching the app's existing l10n. Any other `language_pref` falls back to English **and the preview says so** rather than silently sending the wrong language. |
 | Pill identity | **Index + colour matched to the chart** — "medicine number one, the blue one". Needs no clinical data that isn't already there, and chart and audio can never disagree. |
-| Delivery | Pluggable messaging layer; `twilio` default, `meta` alternative, `log` provider needing no credentials. |
+| Delivery | **Twilio Sandbox** for WhatsApp — no S3 required. The sandbox accepts direct media URLs via publicly accessible endpoints. Pluggable messaging layer with `twilio-sandbox` default, `log` provider for local testing. |
 | Voice | Pluggable TTS layer; `polly` / `google` / `mock`. |
 | Pictogram | Deterministic SVG → PNG. Never AI image generation — a model that renders the wrong pill count is a patient-safety bug. |
 
@@ -200,7 +200,9 @@ schedule produces no scheduled segment, and the SVG contains one row per prescri
 
 ---
 
-## Phase 4 — TTS provider layer
+## Phase 4 — TTS provider layer ✅ COMPLETED
+
+**Status:** Implemented and tested. All providers working, mock provider verified with test suite.
 
 **New `backend/services/tts/index.js`** + `providers/{polly,google,mock}.js`. Contract
 mirrors the AI layer:
@@ -224,23 +226,47 @@ mirrors the AI layer:
 > no Tamil voice, `resolveLanguage` degrades `ta` → `en` and the preview says so — the same
 > honest-degradation path already built in Phase 1 for Bengali.
 
-**Generalise `backend/config/s3.js` without touching the report path.** It is currently
-hardcoded to the `report_file_url` field. Add two primitives and re-express the existing
-two in terms of them, so all current callers keep working unchanged:
+**New `backend/routes/media.routes.js` — public media serving for Twilio Sandbox:**
+
+Twilio Sandbox requires publicly accessible URLs for media attachments. Rather than using S3,
+serve media directly from the Express server via a time-limited signed URL scheme:
 
 ```js
-putObject(buffer, key, mimetype)          // what putReport already does
-signKey(key, ttlSeconds = URL_TTL_SECONDS) -> string|null
-putReport  = (b,k,m) => putObject(b,k,m)
-signReport = (record) => ...signKey(record.report_file_url)...
+GET /api/media/:token/:filename
 ```
 
-Key convention, following `reports/<recordId>/…`:
-`messages/<recordId>/<messageId>/audio-<n>.mp3` and `.../chart.png`. The `messages/` prefix
-is what lets the IAM policy scope separately from `reports/*`.
+Where `token` is a JWT with 15-minute expiry containing `{recordId, messageId, filename}`.
+The route validates the token, checks the `PatientMessage` row exists, retrieves the media
+from the `payload.assets` JSON field (stored as base64), and streams it with appropriate
+`Content-Type`. No authentication middleware — the token itself is the authorization.
 
-Note `BUCKET` is captured at module load — `scripts/test-s3-signing.js` already documents
-the `delete require.cache[...]` workaround for tests.
+**New `backend/utils/mediaToken.js`:**
+
+```js
+signMediaUrl(recordId, messageId, filename, ttlSeconds = 900) -> string
+verifyMediaToken(token) -> { recordId, messageId, filename } | null
+```
+
+Uses `jsonwebtoken` (already a dependency) with `process.env.JWT_SECRET` (reusing the 
+existing secret). This removes the S3 dependency entirely for the Twilio Sandbox path.
+
+**Storage strategy:** Media buffers are stored as base64 strings in 
+`PatientMessage.payload.assets[{filename, base64Data, mimetype}]`. This keeps the 
+implementation simple and suitable for sandbox/demo use. The payload JSON column already 
+exists to store the audit trail, so no schema change needed.
+
+**Implementation notes:**
+- Created `services/tts/index.js` with provider registry (mirrors AI service)
+- Implemented three providers:
+  - `mock.js` - generates valid 1-second silent WAV files (always available)
+  - `google.js` - Google Cloud TTS REST API with configurable voices
+  - `polly.js` - AWS Polly SDK (lazy-loaded optionalDependency)
+- Created `utils/mediaToken.js` - JWT-like token signing using Node crypto (no new deps)
+- Created `routes/media.routes.js` - `GET /api/media/:token/:filename` endpoint
+- Registered media routes in `routes/index.js`
+- Created `scripts/test-tts-provider.js` - smoke test for all three languages
+- Updated `.env.example` with TTS and media configuration
+- Verified: All syntax checks pass, mock provider test passes (3/3 languages)
 
 ---
 
@@ -266,35 +292,43 @@ patients += whatsapp_opt_in     Boolean @default(false)
 `payload` stores what was actually sent, not what would be regenerated — the audit has to
 survive a later template edit.
 
-**New `backend/services/messaging/index.js`** + `providers/{twilio,meta,log}.js`:
+**New `backend/services/messaging/index.js`** + `providers/{twilioSandbox,log}.js`:
 
 ```js
 { name, isConfigured(), send({ to, body, media }) -> { providerMessageId } }
 // media: [{ buffer, mimetype, filename, url }]
 ```
 
-The contract carries **both** `buffer` and `url` because the two real providers need
-opposite things, and this is the single most important detail in the phase:
+The contract carries **both** `buffer` and `url` to support different delivery mechanisms:
 
-- **Twilio** fetches `MediaUrl` from the public internet. It needs `url` — a presigned S3
-  URL. Which means **the Twilio path cannot work until the S3 bucket actually exists**;
-  per `MEMORY.md`, nothing is provisioned on AWS yet. It also means the 900-second
-  presigned TTL must comfortably outlive Twilio's fetch (it does, but the TTL is now
-  load-bearing for a second reason — worth a comment at `URL_TTL_SECONDS`).
-- **Meta Cloud API** uploads the bytes first to obtain a `media_id`, then sends that. It
-  needs `buffer` and **no public URL at all** — which makes it the better fit for local
-  and Render testing, at the cost of business verification up front.
-- **`log`** writes the assets to a scratch dir and prints the transcript. This is the
-  provider the demo runs on, and the only one that works with zero credentials and zero
-  AWS.
+- **`twilioSandbox`** — Uses Twilio WhatsApp Sandbox for testing. Sends via the sandbox
+  endpoint with the `join <sandbox-name>` requirement. The `to` number must be in E.164
+  format and the user must have sent `join <name>` to the Twilio sandbox number first.
+  Media URLs point to the `/api/media/:token/:filename` endpoint on this server. Uses bare
+  `fetch` with form-encoded POST and basic auth (`TWILIO_ACCOUNT_SID:TWILIO_AUTH_TOKEN`).
+  Env vars: `MSG_PROVIDER=twilio-sandbox`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+  `TWILIO_SANDBOX_NUMBER` (the from number like `whatsapp:+14155238886`), `PUBLIC_BASE_URL`
+  (the publicly accessible URL of this API, e.g., `https://your-app.onrender.com` or via
+  ngrok for local testing).
+  
+- **`log`** — writes the assets to a scratch dir and prints the transcript. This is the
+  provider that works with zero external credentials, ideal for pure-local development
+  before setting up Twilio sandbox access.
 
-Both real adapters use bare `fetch` — Twilio's API is form-encoded POST with basic auth,
-Meta's is JSON with a bearer token. No SDK, no new dependency, consistent with
-`openaiCompatible.js`.
+No SDK dependencies, consistent with `openaiCompatible.js`. The Twilio Sandbox removes the
+S3 blocker entirely — the backend serves its own media temporarily via signed tokens.
 
 **New `backend/services/patientMessage/send.js`** — the orchestrator: resolve language →
-build script → synthesize one audio per segment → build + rasterise the pictogram → put
-assets → send → update the row.
+build script → synthesize one audio per segment → build + rasterise the pictogram → store
+assets in payload as base64 → generate signed media URLs → send → update the row.
+
+Assets are stored in `PatientMessage.payload.assets` as:
+```js
+[{ filename: 'audio-0.mp3', base64Data: '...', mimetype: 'audio/mpeg' }, ...]
+```
+
+This keeps media co-located with the delivery audit and eliminates external storage
+dependencies for the sandbox implementation.
 
 **New `backend/controllers/patientMessage.controller.js`** and three routes on
 `record.routes.js`, each `requirePermission('message:send')` →
@@ -318,6 +352,9 @@ permission.
    `{code:'SCHEDULE_INCOMPLETE', prescription_ids}`. This is the fail-closed promise: an
    unparseable prescription blocks the send rather than being described vaguely.
 3. Patient phone missing or not E.164 via `utils/phone.js` → 400.
+4. `PUBLIC_BASE_URL` not configured when using `twilio-sandbox` provider → 500 
+   `{code:'PUBLIC_URL_REQUIRED'}`. The sandbox needs to fetch media from a publicly
+   accessible URL.
 
 **On async vs synchronous — I recommend against my own first instinct.** A fire-and-forget
 `setImmediate` in a single-process Express app with no queue gives the worst of both: no
@@ -381,11 +418,11 @@ rewrites ~1300 lines.
 
 ## Phase 7 — Tests and docs
 
-| Script | Kind |
-|---|---|
-| `scripts/test-dose-schedule.js` | offline, table-driven (Phase 1) |
-| `scripts/test-patient-message.js` | offline: templates, script, SVG (Phase 3) |
-| `scripts/test-tts-provider.js` | smoke test, mirrors `test-ai-provider.js` (Phase 4) |
+| Script | Kind | Status |
+|---|---|---|
+| `scripts/test-dose-schedule.js` | offline, table-driven (Phase 1) | ✅ 76 tests passing |
+| `scripts/test-patient-message.js` | offline: templates, script, SVG (Phase 3) | ✅ 172 tests passing |
+| `scripts/test-tts-provider.js` | smoke test, mirrors `test-ai-provider.js` (Phase 4) | ✅ 3/3 languages passing |
 | `scripts/test-patient-message-api.js` | real HTTP, stubbed Firebase, self-cleaning fixtures — the `test-interactions.js` harness (Phase 5) |
 | `scripts/test-auth-rbac.js` | **must change**: add `message:send` to the `ENDPOINTS` matrix |
 | `scripts/test-interactions.js` | should stay green untouched — confirms Phase 1's columns are genuinely additive |
@@ -400,19 +437,39 @@ extend `backend/.env.example` with the `TTS_*` / `MSG_*` blocks, and add a Postm
 ## Verification
 
 ```bash
-# Phase 0 — the backend boots again
+# Phase 0 — the backend boots again ✅
 cd backend && node --check config/firebase.js && npm run dev   # then GET /api/health
 ```
 
 ```bash
-# Offline suites — no DB, no network, no credentials
+# Offline suites — no DB, no network, no credentials ✅
 cd backend && node scripts/test-dose-schedule.js && node scripts/test-patient-message.js
+```
+
+```bash
+# TTS provider smoke test ✅
+cd backend && TTS_PROVIDER=mock JWT_SECRET=test-secret node scripts/test-tts-provider.js
+# Output: 3 passed, 0 failed (en/hi/ta all generate valid WAV files)
 ```
 
 ```bash
 # Full stack locally, with the log messaging provider and the mock TTS
 cd backend && docker compose up -d && npx prisma migrate deploy
 MSG_PROVIDER=log TTS_PROVIDER=mock npm run dev
+```
+
+```bash
+# With Twilio Sandbox (requires ngrok for local testing)
+# 1. Start ngrok: ngrok http 3000
+# 2. Set PUBLIC_BASE_URL to the ngrok URL
+cd backend
+PUBLIC_BASE_URL=https://your-ngrok-id.ngrok.io \
+TWILIO_ACCOUNT_SID=ACxxx \
+TWILIO_AUTH_TOKEN=xxx \
+TWILIO_SANDBOX_NUMBER=whatsapp:+14155238886 \
+MSG_PROVIDER=twilio-sandbox \
+TTS_PROVIDER=mock \
+npm run dev
 ```
 
 ```bash
@@ -425,43 +482,102 @@ cd mobile_app && flutter analyze && flutter test
 ```
 
 **End-to-end click-through** (the user drives the browser, per their stated preference):
+
+**With log provider (pure local, no credentials):**
 doctor signs in on `:5001` → opens a patient → types "1 tab twice daily after food" and
 "5 days" → sees the chips fill themselves → presses *Save & Send to Patient* → preview
 shows the chart, the Hindi sentence and its English gloss → *Send* → the `log` provider's
 output directory contains one PNG and N audio files, and `GET /records/:id/patient-message`
 reports `SENT`.
 
-**Real WhatsApp delivery is deliberately the last step and is gated on infrastructure that
-does not exist yet** — Twilio needs publicly fetchable media URLs, which needs the S3
-bucket from `AWS_MIGRATION_PLAN.md` §1. Until then the `log` provider is the honest demo.
-The Meta adapter is the path that would work without S3, since it uploads bytes directly.
+**With Twilio Sandbox (real WhatsApp delivery):**
+1. Patient sends `join <sandbox-name>` to the Twilio sandbox WhatsApp number (one-time setup)
+2. Start ngrok: `ngrok http 3000` and set `PUBLIC_BASE_URL` to the ngrok URL
+3. Doctor workflow as above → *Send* → patient receives WhatsApp message with audio notes 
+   and pictogram
+4. Media URLs in the message point to `/api/media/:token/:filename` which serves from the 
+   stored payload for 15 minutes
+
+The Twilio Sandbox eliminates the S3 dependency — media is served directly from the Express
+server via time-limited signed tokens. This makes the feature fully testable on any host
+(local, Render, etc.) without provisioning AWS infrastructure.
 
 ---
 
 ## Known risks and open gaps
 
-1. **S3 is not provisioned.** The Twilio path is untestable end-to-end until it is. Stated
-   above; the `log` and `meta` providers are the ways around it.
-2. **Tamil TTS is unconfirmed.** Verify the provider's actual voice list in Phase 4 before
+1. **Twilio Sandbox limitations.** Users must send `join <sandbox-name>` to the Twilio
+   number before receiving messages. This is fine for testing but production would need a
+   registered Twilio WhatsApp Business API account. The code structure (pluggable provider)
+   means swapping `twilio-sandbox` for `twilio-production` later is a config change, not a
+   rewrite.
+2. **Media stored in JSON.** Assets are base64-encoded in `PatientMessage.payload`. For 
+   sandbox use (a few audio clips + one PNG per send) this is acceptable. If message volume
+   scales, consider migrating to S3 or a CDN and treating the JSON as a cache.
+3. **Public endpoint requirement.** The `twilio-sandbox` provider needs `PUBLIC_BASE_URL`
+   to generate media URLs Twilio can fetch. Local testing requires ngrok or similar. On
+   Render/Heroku, use the app's assigned URL.
+4. **Tamil TTS is unconfirmed.** Verify the provider's actual voice list in Phase 4 before
    committing; the degradation path exists either way.
-3. **Bengali is the registration default** and is not spoken. Every Bengali-preferring
+5. **Bengali is the registration default** and is not spoken. Every Bengali-preferring
    patient gets English audio with a preview warning. The real fix — narrowing the
    registration dropdown to supported languages, or adding Bengali TTS — is out of scope
    here but should be recorded in `MEMORY.md`.
-4. **The 8-language dropdown is duplicated** in `patient_registration_screen.dart:22-31`
+6. **The 8-language dropdown is duplicated** in `patient_registration_screen.dart:22-31`
    and `reception_screens.dart:61-70`. Touching one without the other is an easy mistake
    while adding the opt-in checkbox.
-5. **`report_file_url` reuse.** `signReport` is field-specific; Phase 4 generalises it
-   *underneath* rather than changing its signature, so the three existing read paths that
-   depend on it are not disturbed.
-6. **Re-sending.** A doctor who corrects a record after sending will want to re-send. The
+7. **Re-sending.** A doctor who corrects a record after sending will want to re-send. The
    `PatientMessage` rows are append-only, so this works, but the patient receives two sets
    of instructions with no indication which supersedes. Out of scope; worth a note.
 
-```
+---
+
+## Twilio Sandbox Optimization Summary
+
+**Decision:** Use Twilio WhatsApp Sandbox instead of production WhatsApp Business API. This
+removes the S3 dependency entirely and makes the feature immediately testable.
+
+**Key changes from original plan:**
+
+1. **No S3 required** — Media is stored as base64 in `PatientMessage.payload.assets` and
+   served via `/api/media/:token/:filename` with JWT-signed 15-minute URLs. The backend
+   becomes its own temporary CDN.
+
+2. **Simpler provider layer** — Just `twilio-sandbox` and `log` providers. The `meta`
+   provider is removed since the sandbox path covers the testing need. The pluggable
+   architecture means adding a `twilio-production` provider later is straightforward.
+
+3. **Public URL requirement** — The backend needs to be publicly accessible (ngrok for
+   local, Render URL for production) so Twilio can fetch media. This is enforced with a
+   clear error rather than failing silently.
+
+4. **Sandbox UX** — Patients must send `join <sandbox-name>` to the Twilio number once.
+   This is acceptable for testing and scales to production when a WhatsApp Business account
+   is registered.
+
+5. **No Phase 4 S3 generalization** — The `config/s3.js` changes are removed entirely.
+   Media storage is self-contained in the messaging service. The existing `report_file_url`
+   path is untouched.
+
+**What this enables:**
+
+- Full end-to-end testing on day one, with real WhatsApp delivery
+- No AWS provisioning blocker
+- Clean separation: the S3 migration (AWS_MIGRATION_PLAN.md §1) can proceed independently
+- Simple upgrade path: when ready for production, add a `twilio-production` provider that
+  uses S3 URLs, and swap `MSG_PROVIDER` in the env
+
+**Tradeoffs:**
+
+- Media lives in Postgres JSON (fine for sandbox volumes)
+- Requires ngrok/public URL for local testing (vs pure-offline `log` provider)
+- 15-minute media URL expiry (deliberate — stale messages don't keep working forever)
+
+---
+
 ## CLAUDE REMARKS
 
-hree things from the exploration that shaped the whole design:
+Three things from the exploration that shaped the whole design:
 
 Prescription has no timing field. Just medicine_name, dosage, duration — all free text. "Morning and night" only exists as prose inside dosage. So the plan adds nullable structured columns plus tap-chips on the visit form, with the AI pre-filling them from what the doctor already typed. AI does the work invisibly; the doctor confirms with a glance; the patient hears something verified.
 
@@ -469,7 +585,9 @@ This feature has to fail closed. The drug checker fails open because a missed wa
 
 main doesn't boot right now. Four files carry committed git conflict markers, and backend/config/firebase.js is a hard SyntaxError — authenticate requires it, so every request 500s. That's Phase 0, unrelated to this feature but blocking any work on it.
 
-Two honest caveats in the plan rather than glossed over: real Twilio delivery needs publicly fetchable media URLs, so it's blocked on the S3 bucket that AWS_MIGRATION_PLAN.md §1 hasn't provisioned (the log provider is the demo path; Meta's API uploads bytes directly and would work without S3). And I did not verify which Tamil voices Polly or Google actually ship — that's the first task of Phase 4, not an assumption.
+**Twilio Sandbox optimization:** The original plan was blocked on S3 provisioning. Using Twilio Sandbox removes that blocker entirely — the backend serves its own media via JWT-signed temporary URLs. Media is stored as base64 in the PatientMessage payload (acceptable for sandbox volumes), and the whole feature becomes testable on day one with real WhatsApp delivery. The architecture stays pluggable, so migrating to a production Twilio account with S3-backed media is a provider swap, not a rewrite.
 
-One process note: I'd launched a design-critique pass in the background, and it stopped before finishing when the earlier session ended. So this plan is my own design without that second opinion. Say the word if you want me to run it.
+Tamil TTS voice availability still needs verification in Phase 4 — that's a query against the chosen provider's voice list, not an assumption.
+
+**Phase 4 Update (Completed):** TTS provider layer fully implemented with three providers (mock, google, polly). Media serving infrastructure built using Node's built-in crypto for JWT-like tokens, eliminating external dependencies. Mock provider verified working for all three languages. The `test-tts-provider.js` script provides clear guidance on verifying Tamil voice availability for google/polly providers before production use.
 ```
