@@ -62,6 +62,13 @@ enum InteractionSeverity {
   CRITICAL
 }
 
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+}
+
 // ------------------------------------------------------------
 // 0. User Entity (Authentication & Role Mapping)
 // ------------------------------------------------------------
@@ -108,12 +115,17 @@ model Patient {
   claim_failures        Int       @default(0)
   claim_locked_until    DateTime?
 
+  // WhatsApp opt-in (Smart Prescriptions Phase 5)
+  whatsapp_opt_in    Boolean   @default(false)
+  whatsapp_opt_in_at DateTime?
+
   user               User?              @relation(fields: [user_id], references: [id], onDelete: Cascade)
   appointments       Appointment[]
   medical_records    MedicalRecord[]
   interaction_checks InteractionCheck[]
   consent_requests   ConsentRequest[]
   access_logs        PatientAccessLog[]
+  patient_messages   PatientMessage[]
 
   @@map("patients")
 }
@@ -164,6 +176,7 @@ model Doctor {
   medical_records    MedicalRecord[]
   interaction_checks InteractionCheck[]
   consent_requests   ConsentRequest[]
+  patient_messages   PatientMessage[]
 
   @@map("doctors")
 }
@@ -207,6 +220,7 @@ model MedicalRecord {
   appointment        Appointment?       @relation(fields: [appointment_id], references: [id], onDelete: SetNull)
   prescriptions      Prescription[]
   interaction_checks InteractionCheck[]
+  patient_messages   PatientMessage[]
 
   @@index([patient_id])
   @@map("medical_records")
@@ -378,4 +392,35 @@ model PatientAccessLog {
   @@index([patient_id])
   @@index([clinic_id])
   @@map("patient_access_logs")
+}
+
+// ------------------------------------------------------------
+// 12. Patient Message (Smart Prescriptions Phase 5)
+// ------------------------------------------------------------
+// Delivery audit for WhatsApp medication instructions. One row per send.
+// payload stores the exact segments and asset keys sent, so the audit
+// survives template edits. Assets themselves stored as base64 in payload.assets.
+// ------------------------------------------------------------
+model PatientMessage {
+  id                  String        @id @default(uuid()) @db.Uuid
+  record_id           String        @db.Uuid
+  patient_id          String        @db.Uuid
+  doctor_id           String        @db.Uuid
+  language            String
+  status              MessageStatus @default(QUEUED)
+  provider            String?
+  provider_message_id String?
+  error               String?       @db.Text
+  payload             Json
+  created_at          DateTime      @default(now())
+  sent_at             DateTime?
+
+  record  MedicalRecord @relation(fields: [record_id], references: [id], onDelete: Cascade)
+  patient Patient       @relation(fields: [patient_id], references: [id], onDelete: Cascade)
+  doctor  Doctor        @relation(fields: [doctor_id], references: [id], onDelete: Cascade)
+
+  @@index([record_id])
+  @@index([patient_id])
+  @@index([status])
+  @@map("patient_messages")
 }

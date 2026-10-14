@@ -16,6 +16,7 @@ const PERMISSIONS = {
     'patient:register', 'patient:lookup', 'appointment:manage',
     'record:read', 'record:write', 'interaction:check', 'report:upload',
     'consent:request', 'consent:emergency',
+    'message:send', // Smart Prescriptions Phase 5
   ],
   CLINIC_ADMIN: [
     'patient:register', 'patient:lookup', 'appointment:manage',

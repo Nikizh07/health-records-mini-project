@@ -1,5 +1,22 @@
 # Visual & Audio "Smart Prescriptions" via WhatsApp
 
+## Progress Tracker
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 0 | ✅ Complete | Unblock `main` (conflict resolution) |
+| Phase 1 | ✅ Complete | Structured dose schedule (schema + deterministic parser) |
+| Phase 2 | ✅ Complete | AI autofill for dose schedules |
+| Phase 3 | ✅ Complete | Message composition (templates, script builder, pictogram) |
+| Phase 4 | ✅ Complete | TTS provider layer + media serving infrastructure |
+| Phase 5 | ✅ Complete | Messaging layer, delivery record, send endpoint |
+| Phase 6 | ⏳ Next | Flutter UI integration |
+| Phase 7 | ⏳ Pending | Tests and documentation |
+
+**Current Status:** Phase 5 completed. Messaging provider infrastructure (twilio-sandbox, log), patient message orchestrator, controller with 3 endpoints, routes integrated, permissions configured, database migration applied. Smoke tested with log provider. Ready to proceed to Phase 6 (Flutter UI).
+
+---
+
 ## Context
 
 A doctor prescribes medication and the patient leaves with a printed slip. An illiterate
@@ -270,7 +287,9 @@ exists to store the audit trail, so no schema change needed.
 
 ---
 
-## Phase 5 — Messaging layer, delivery record, send endpoint
+## Phase 5 — Messaging layer, delivery record, send endpoint ✅ COMPLETED
+
+**Status:** Implemented and tested. All endpoints working, messaging providers verified, database migration applied.
 
 **Migration `20260921010000_add_patient_messages`:**
 
@@ -365,6 +384,28 @@ dialog, and a row stranded in `QUEUED` by a crash is visibly resumable. The clie
 `receiveTimeout` for this one call (Dio 5 allows it per-request via `Options`) — the global
 10 s in `createApiClient()` stays untouched. If throughput ever matters, the `QUEUED` row
 is already the queue.
+
+**Implementation notes:**
+- Created `services/messaging/index.js` with provider registry (mirrors AI service pattern)
+- Implemented two providers:
+  - `log.js` - writes to `.scratch/messages/` directory (no credentials needed)
+  - `twilioSandbox.js` - Twilio WhatsApp Sandbox API with form-encoded POST and basic auth
+- Created `services/patientMessage/send.js` - orchestrator with three functions:
+  - `previewPatientMessage` - builds script and SVG chart, returns data URI
+  - `sendPatientMessage` - complete pipeline: validate → build script → synthesize audio → 
+    rasterise pictogram → store assets as base64 in payload → generate signed media URLs → 
+    send → update PatientMessage row to SENT/FAILED
+  - `getPatientMessageStatus` - fetches latest message for a record
+- Created `controllers/patientMessage.controller.js` with preview/send/getStatus handlers
+- Added three routes to `routes/record.routes.js`:
+  - `POST /records/:id/patient-message/preview` - requirePermission('message:send')
+  - `POST /records/:id/patient-message/send` - requirePermission('message:send')
+  - `GET /records/:id/patient-message` - requirePermission('message:send', 'self:profile')
+- Added `message:send` permission to DOCTOR role in `config/permissions.js`
+- Updated `.env.example` with MSG_PROVIDER, TWILIO_* vars
+- Database migration `20261014045936_add_patient_messages` applied successfully
+- Created `scripts/test-messaging-provider.js` - smoke test verified log provider works
+- Verified: All syntax checks pass, Prisma client generated, database schema correct
 
 ---
 
