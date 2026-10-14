@@ -13,6 +13,7 @@
 
 const PROVIDERS = {
   'twilio-sandbox': require('./providers/twilioSandbox'),
+  'meta-cloud': require('./providers/metaCloud'),
   log: require('./providers/log'),
 };
 

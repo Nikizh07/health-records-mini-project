@@ -31,6 +31,12 @@ const RECORD_INCLUDE = {
       medicine_name: true,
       dosage: true,
       duration: true,
+      slots: true,
+      food_relation: true,
+      pills_per_dose: true,
+      prn: true,
+      prn_condition: true,
+      schedule_source: true,
       created_at: true,
     },
   },
@@ -246,10 +252,46 @@ async function createMedicalRecord(req, res, next) {
           });
         }
 
+        // Validate optional schedule fields if present
+        const VALID_SLOTS = ['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT'];
+        const VALID_FOOD = ['BEFORE', 'AFTER', 'WITH', 'ANY'];
+        const VALID_SOURCES = ['DOCTOR', 'AI', 'PARSED'];
+
+        let slots = [];
+        if (Array.isArray(item.slots)) {
+          slots = item.slots.filter(s => VALID_SLOTS.includes(String(s).toUpperCase()))
+                            .map(s => String(s).toUpperCase());
+        }
+
+        const food_relation = VALID_FOOD.includes(String(item.food_relation || '').toUpperCase())
+          ? String(item.food_relation).toUpperCase()
+          : null;
+
+        const pills_per_dose = (item.pills_per_dose !== undefined && item.pills_per_dose !== null)
+          ? parseFloat(item.pills_per_dose)
+          : null;
+
+        const prn = Boolean(item.prn);
+        const prn_condition = prn && typeof item.prn_condition === 'string' && item.prn_condition.trim()
+          ? item.prn_condition.trim()
+          : null;
+
+        // schedule_source is only meaningful when a schedule was actually set
+        const hasSchedule = slots.length > 0 || prn;
+        const schedule_source = hasSchedule && VALID_SOURCES.includes(String(item.schedule_source || '').toUpperCase())
+          ? String(item.schedule_source).toUpperCase()
+          : null;
+
         formattedPrescriptions.push({
           medicine_name: item.medicine_name.trim(),
           dosage: item.dosage.trim(),
           duration: item.duration.trim(),
+          slots,
+          food_relation,
+          pills_per_dose,
+          prn,
+          prn_condition,
+          schedule_source,
         });
       }
     }

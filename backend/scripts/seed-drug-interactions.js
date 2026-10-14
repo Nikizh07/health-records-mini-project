@@ -33,6 +33,7 @@ const INTERACTIONS = [
   // ── Anticoagulants / antiplatelets — bleeding risk ──
   ['warfarin', 'ibuprofen', 'CRITICAL', 'NSAIDs inhibit platelet function and irritate gastric mucosa, sharply increasing the risk of major bleeding in a patient already anticoagulated with warfarin.', 'Acetaminophen'],
   ['warfarin', 'naproxen', 'CRITICAL', 'Same NSAID bleeding risk as ibuprofen, with a longer half-life prolonging the exposure.', 'Acetaminophen'],
+  ['paracetamol', 'warfarin', 'MODERATE', 'Paracetamol (acetaminophen) at doses above 2 g/day inhibits CYP2C9 and reduces vitamin K metabolism, potentiating warfarin and raising INR. Safe at low doses but INR should be monitored with regular use.', 'Keep paracetamol dose ≤ 2 g/day and monitor INR'],
   ['warfarin', 'diclofenac', 'CRITICAL', 'NSAID antiplatelet effect plus gastric irritation markedly raises bleeding risk on warfarin.', 'Acetaminophen'],
   ['aspirin', 'warfarin', 'CRITICAL', 'Additive anticoagulant and antiplatelet effects substantially increase the risk of gastrointestinal and intracranial bleeding.', 'Acetaminophen for analgesia'],
   ['clopidogrel', 'warfarin', 'CRITICAL', 'Dual antiplatelet plus anticoagulant therapy greatly increases major bleeding risk and should only be used under specialist supervision.', null],

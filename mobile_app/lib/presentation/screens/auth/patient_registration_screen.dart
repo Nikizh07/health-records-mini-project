@@ -267,7 +267,7 @@ class _PatientRegistrationScreenState extends ConsumerState<PatientRegistrationS
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.whatsapp, color: Colors.green.shade700, size: 20),
+                              Icon(Icons.chat, color: Colors.green.shade700, size: 20),
                               const SizedBox(width: 8),
                               Text(
                                 'WhatsApp Messages',

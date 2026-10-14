@@ -114,7 +114,7 @@ class _Records extends RecordService {
   List<Map<String, dynamic>> conflicts = const [];
   bool aiAvailable = false;
   int checkCalls = 0;
-  List<Map<String, String>>? checkedPrescriptions;
+  List<Map<String, dynamic>>? checkedPrescriptions;
   int historyCalls = 0;
   bool consentRequired = false;
 
@@ -122,7 +122,7 @@ class _Records extends RecordService {
   Future<Map<String, dynamic>> checkDrugInteractions({
     required String idToken,
     required String patientId,
-    required List<Map<String, String>> prescriptions,
+    required List<Map<String, dynamic>> prescriptions,
   }) async {
     checkCalls++;
     checkedPrescriptions = prescriptions;
@@ -154,11 +154,7 @@ class _Records extends RecordService {
     String? visitDate,
     required String diagnosis,
     String? notes,
-    List<Map<String, String>>? prescriptions,
-    String? checkId,
-    String? overrideReason,
-  }) async {
-    created = {
+    List<Map<String, dynamic>>? prescriptions,
       'patient_id': patientId,
       'doctor_id': doctorId,
       'diagnosis': diagnosis,

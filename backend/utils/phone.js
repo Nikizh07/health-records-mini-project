@@ -29,4 +29,4 @@ function toE164(raw) {
   return e164 && /^\+[1-9]\d{7,14}$/.test(e164) ? e164 : null;
 }
 
-module.exports = { toE164 };
+module.exports = { toE164, normalisePhone: toE164 };

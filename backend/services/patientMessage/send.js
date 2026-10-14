@@ -181,6 +181,20 @@ async function sendPatientMessage(recordId, language) {
     });
   }
 
+  // Guard: only block if a message is currently in-flight (QUEUED).
+  // SENT records can be resent — the doctor may want to resend after edits
+  // or for a follow-up. FAILED records should always be retried.
+  const inFlight = await prisma.patientMessage.findFirst({
+    where: { record_id: recordId, status: 'QUEUED' },
+    select: { id: true },
+  });
+  if (inFlight) {
+    throw Object.assign(
+      new Error('A message is already being sent for this record. Please wait for it to complete.'),
+      { code: 'DUPLICATE_SEND' }
+    );
+  }
+
   // Create QUEUED message row
   const message = await prisma.patientMessage.create({
     data: {
@@ -256,12 +270,27 @@ async function sendPatientMessage(recordId, language) {
     const body = bodyParts.join('\n');
 
     // Send via messaging provider
-    const phone = normalisePhone(record.patient.phone);
-    const sendResult = await sendMessage({
-      to: phone,
-      body,
-      media: mediaForSend,
-    });
+    // TEMP TESTING OVERRIDE: Use hardcoded number for WhatsApp testing
+    // In production, this would use: normalisePhone(record.patient.phone)
+    const phone = '+919342060715'; // Hardcoded test number
+
+    // Try with media first; if the provider rejects media (e.g. Twilio trial
+    // account restriction), fall back to text-only so the message still lands.
+    let sendResult;
+    try {
+      sendResult = await sendMessage({
+        to: phone,
+        body,
+        media: mediaForSend,
+      });
+    } catch (mediaErr) {
+      console.warn('⚠️  Media send failed, retrying text-only:', mediaErr.message);
+      sendResult = await sendMessage({
+        to: phone,
+        body,
+        media: [],
+      });
+    }
 
     // Update message row to SENT
     await prisma.patientMessage.update({

@@ -66,7 +66,7 @@ class RecordService {
     String? visitDate,
     required String diagnosis,
     String? notes,
-    List<Map<String, String>>? prescriptions,
+    List<Map<String, dynamic>>? prescriptions,
     String? checkId,
     String? overrideReason,
   }) async {
@@ -77,7 +77,7 @@ class RecordService {
         if (doctorId != null && doctorId.isNotEmpty) 'doctor_id': doctorId,
         if (appointmentId != null && appointmentId.isNotEmpty) 'appointment_id': appointmentId,
         if (visitDate != null && visitDate.isNotEmpty) 'visit_date': visitDate,
-        'notes': ?notes,
+        if (notes != null) 'notes': notes,
         if (prescriptions != null && prescriptions.isNotEmpty) 'prescriptions': prescriptions,
         // Links the save to the pre-flight interaction check. The server reads
         // the conflicts back from that row, so it rejects the save unless a
@@ -118,7 +118,7 @@ class RecordService {
   Future<Map<String, dynamic>> checkDrugInteractions({
     required String idToken,
     required String patientId,
-    required List<Map<String, String>> prescriptions,
+    required List<Map<String, dynamic>> prescriptions,
   }) async {
     try {
       final response = await _dio.post(
@@ -152,7 +152,7 @@ class RecordService {
   /// prescription order.
   Future<Map<String, dynamic>> parseSchedules({
     required String idToken,
-    required List<Map<String, String>> prescriptions,
+    required List<Map<String, dynamic>> prescriptions,
   }) async {
     try {
       final response = await _dio.post(

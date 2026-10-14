@@ -211,7 +211,7 @@ class _RegisterPatientDialogState
                             children: [
                               Row(
                                 children: [
-                                  Icon(Icons.whatsapp, color: Colors.green.shade700, size: 16),
+                                  Icon(Icons.chat, color: Colors.green.shade700, size: 16),
                                   const SizedBox(width: 6),
                                   Text(
                                     'WhatsApp prescription messages',

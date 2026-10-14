@@ -1079,12 +1079,8 @@ class _PrescriptionEntry {
     String dosage = '',
     String duration = '',
     Set<String>? initialSlots,
-    this.foodRelation,
-    this.prn = false,
     String prnCondition = '',
-    this.pillsPerDose,
-    this.source = 'DOCTOR',
-  })  : medicineController = TextEditingController(text: medicine),
+  })  : foodRelation = null, prn = false, pillsPerDose = null, source = 'PARSED', medicineController = TextEditingController(text: medicine),
         dosageController = TextEditingController(text: dosage),
         durationController = TextEditingController(text: duration),
         prnConditionController = TextEditingController(text: prnCondition),
@@ -1315,12 +1311,9 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
             ),
           );
 
-          // Navigate away
-          if (context.canPop()) {
-            context.pop();
-          } else {
-            context.go('/doctor/today-appointments');
-          }
+          // Navigate to appointments — always use go() so the stack is
+          // replaced cleanly rather than popping into a blank page.
+          context.go('/doctor/today-appointments');
         } catch (e) {
           if (!mounted) return;
           Navigator.pop(context); // Close loading
@@ -1398,8 +1391,9 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
       return;
     }
 
-    // Format prescriptions payload
-    final formattedPrescriptions = <Map<String, String>>[];
+    // Format prescriptions payload — include structured schedule fields
+    // so the backend can save them and the WhatsApp send can speak the instructions.
+    final formattedPrescriptions = <Map<String, dynamic>>[];
     for (int i = 0; i < _prescriptions.length; i++) {
       final item = _prescriptions[i];
       final med = item.medicineController.text.trim();
@@ -1423,6 +1417,16 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
           'medicine_name': med,
           'dosage': dos,
           'duration': dur,
+          // Structured schedule fields — populated by autofill or doctor chip selection
+          'slots': item.slots.toList(),
+          if (item.foodRelation != null) 'food_relation': item.foodRelation,
+          if (item.pillsPerDose != null) 'pills_per_dose': item.pillsPerDose,
+          'prn': item.prn,
+          if (item.prn && item.prnConditionController.text.trim().isNotEmpty)
+            'prn_condition': item.prnConditionController.text.trim(),
+          // Only send schedule_source when there is actually a schedule to attribute
+          if (item.slots.isNotEmpty || item.prn)
+            'schedule_source': item.source,
         });
       }
     }

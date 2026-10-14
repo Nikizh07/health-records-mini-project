@@ -73,6 +73,17 @@ async function send(req, res, next) {
       data: result,
     });
   } catch (err) {
+    // Duplicate send guard
+    if (err.code === 'DUPLICATE_SEND') {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: err.code,
+          message: err.message,
+        },
+      });
+    }
+
     // Special handling for SCHEDULE_INCOMPLETE errors
     if (err.code === 'SCHEDULE_INCOMPLETE') {
       return res.status(400).json({
