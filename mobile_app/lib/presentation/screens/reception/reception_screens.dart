@@ -75,6 +75,7 @@ class _RegisterPatientDialogState
   final _dob = TextEditingController();
   String _gender = 'Male';
   String _language = 'Hindi';
+  bool _whatsappOptIn = false;
   bool _busy = false;
   String? _error;
 
@@ -102,6 +103,7 @@ class _RegisterPatientDialogState
             gender: _gender,
             languagePref: _language,
             phone: _phone.text.trim(),
+            whatsappOptIn: _whatsappOptIn,
           );
       if (mounted) Navigator.pop(context, patient);
     } catch (e) {
@@ -181,6 +183,60 @@ class _RegisterPatientDialogState
                       DropdownMenuItem(value: l, child: Text(l)),
                   ],
                   onChanged: (v) => _language = v ?? _language,
+                ),
+                const SizedBox(height: 16),
+                // WhatsApp Consent Checkbox
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.shade200),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Checkbox(
+                        value: _whatsappOptIn,
+                        onChanged: (bool? value) {
+                          setState(() => _whatsappOptIn = value ?? false);
+                        },
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.whatsapp, color: Colors.green.shade700, size: 16),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'WhatsApp prescription messages',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.grey.shade800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Voice notes in Hindi, English, or Tamil',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),

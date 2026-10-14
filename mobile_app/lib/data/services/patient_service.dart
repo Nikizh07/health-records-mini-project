@@ -43,6 +43,7 @@ class PatientService {
     required String gender, // 'Male', 'Female', 'Other'
     required String languagePref,
     String? phone,
+    bool whatsappOptIn = false,
   }) async {
     try {
       final response = await _dio.post(
@@ -52,7 +53,8 @@ class PatientService {
           'dob': dob,
           'gender': gender,
           'language_pref': languagePref,
-          'phone': ?phone,
+          'phone': phone,
+          'whatsapp_opt_in': whatsappOptIn,
         },
         options: Options(
           headers: {
@@ -79,11 +81,19 @@ class PatientService {
     required String gender,
     required String languagePref,
     required String phone,
+    bool whatsappOptIn = false,
   }) async {
     try {
       final response = await _dio.post(
         '/patients/register',
-        data: {'name': name, 'dob': dob, 'gender': gender, 'language_pref': languagePref, 'phone': phone},
+        data: {
+          'name': name,
+          'dob': dob,
+          'gender': gender,
+          'language_pref': languagePref,
+          'phone': phone,
+          'whatsapp_opt_in': whatsappOptIn,
+        },
         options: Options(headers: {'Authorization': 'Bearer $idToken'}),
       );
       return response.data['data'] as Map<String, dynamic>;

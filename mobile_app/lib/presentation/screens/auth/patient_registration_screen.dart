@@ -17,6 +17,7 @@ class _PatientRegistrationScreenState extends ConsumerState<PatientRegistrationS
 
   String _selectedGender = 'Male';
   String _selectedLanguage = 'Bengali';
+  bool _whatsappOptIn = false;
 
   final List<String> _genderOptions = ['Male', 'Female', 'Other'];
   final List<String> _languageOptions = [
@@ -67,6 +68,7 @@ class _PatientRegistrationScreenState extends ConsumerState<PatientRegistrationS
             dob: _dobController.text.trim(),
             gender: _selectedGender,
             languagePref: _selectedLanguage,
+            whatsappOptIn: _whatsappOptIn,
           );
 
       if (success && mounted) {
@@ -248,6 +250,76 @@ class _PatientRegistrationScreenState extends ConsumerState<PatientRegistrationS
                           setState(() => _selectedLanguage = val);
                         }
                       },
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // WhatsApp Consent Checkbox
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.whatsapp, color: Colors.green.shade700, size: 20),
+                              const SizedBox(width: 8),
+                              Text(
+                                'WhatsApp Messages',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green.shade900,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Checkbox(
+                                value: _whatsappOptIn,
+                                onChanged: (bool? value) {
+                                  setState(() => _whatsappOptIn = value ?? false);
+                                },
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 12),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Send me prescription instructions via WhatsApp',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.grey.shade800,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Voice messages in your language (English, Hindi, Tamil supported)',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey.shade600,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
 
                     const SizedBox(height: 28),

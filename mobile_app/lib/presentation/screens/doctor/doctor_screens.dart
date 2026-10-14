@@ -11,6 +11,7 @@ import '../../widgets/responsive_card_list.dart';
 import '../clinic/clinic_shell.dart';
 import '../consent/consent_screens.dart';
 import '../reception/reception_screens.dart';
+import 'patient_message_dialog.dart';
 
 // ============================================================================
 // 1. DOCTOR'S "TODAY'S APPOINTMENTS" SCREEN (Day 20 - Task 1)
@@ -1064,19 +1065,36 @@ class _PrescriptionEntry {
   final TextEditingController medicineController;
   final TextEditingController dosageController;
   final TextEditingController durationController;
+  final TextEditingController prnConditionController;
+
+  // Schedule state
+  Set<String> slots;
+  String? foodRelation;
+  bool prn;
+  double? pillsPerDose;
+  String source; // 'DOCTOR' | 'AI' | 'PARSED'
 
   _PrescriptionEntry({
     String medicine = '',
     String dosage = '',
     String duration = '',
+    Set<String>? initialSlots,
+    this.foodRelation,
+    this.prn = false,
+    String prnCondition = '',
+    this.pillsPerDose,
+    this.source = 'DOCTOR',
   })  : medicineController = TextEditingController(text: medicine),
         dosageController = TextEditingController(text: dosage),
-        durationController = TextEditingController(text: duration);
+        durationController = TextEditingController(text: duration),
+        prnConditionController = TextEditingController(text: prnCondition),
+        slots = initialSlots ?? {};
 
   void dispose() {
     medicineController.dispose();
     dosageController.dispose();
     durationController.dispose();
+    prnConditionController.dispose();
   }
 }
 
@@ -1156,6 +1174,86 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
     });
   }
 
+  /// Autofill schedule chips from dosage/duration text using AI + deterministic parsing.
+  /// Only fills chips the doctor hasn't manually touched (source != 'DOCTOR').
+  Future<void> _autofillSchedules() async {
+    final token = ref.read(authTokenProvider);
+    if (token == null) return;
+
+    // Build prescriptions array for parsing
+    final prescriptionsForParsing = <Map<String, String>>[];
+    for (final entry in _prescriptions) {
+      final dosage = entry.dosageController.text.trim();
+      final duration = entry.durationController.text.trim();
+      if (dosage.isNotEmpty || duration.isNotEmpty) {
+        prescriptionsForParsing.add({
+          'medicine_name': entry.medicineController.text.trim(),
+          'dosage': dosage,
+          'duration': duration,
+        });
+      }
+    }
+
+    if (prescriptionsForParsing.isEmpty) return;
+
+    try {
+      final result = await ref.read(recordServiceProvider).parseSchedules(
+            idToken: token,
+            prescriptions: prescriptionsForParsing,
+          );
+
+      final schedules = result['schedules'] as List? ?? [];
+      
+      if (!mounted) return;
+      
+      setState(() {
+        for (int i = 0; i < schedules.length && i < _prescriptions.length; i++) {
+          final schedule = schedules[i] as Map<String, dynamic>;
+          final entry = _prescriptions[i];
+          
+          // Only fill if doctor hasn't manually edited (source != 'DOCTOR')
+          if (entry.source != 'DOCTOR') {
+            // Slots
+            final slots = schedule['slots'] as List?;
+            if (slots != null && slots.isNotEmpty) {
+              entry.slots = Set<String>.from(slots.map((s) => s.toString()));
+            }
+            
+            // Food relation
+            final food = schedule['food_relation']?.toString();
+            if (food != null && food != 'ANY') {
+              entry.foodRelation = food;
+            }
+            
+            // PRN
+            final prn = schedule['prn'] as bool? ?? false;
+            entry.prn = prn;
+            if (prn) {
+              final condition = schedule['prn_condition']?.toString();
+              if (condition != null && condition.isNotEmpty) {
+                entry.prnConditionController.text = condition;
+              }
+            }
+            
+            // Pills per dose
+            final pills = schedule['pills_per_dose'];
+            if (pills != null) {
+              entry.pillsPerDose = pills is int ? pills.toDouble() : pills as double?;
+            }
+            
+            // Mark source as AI
+            final source = schedule['schedule_source']?.toString();
+            entry.source = source ?? 'AI';
+          }
+        }
+      });
+    } catch (e) {
+      // Autofill failure is silent - don't interrupt the doctor's flow
+      // They can still manually select chips
+      debugPrint('Schedule autofill failed: $e');
+    }
+  }
+
   /// The server refused this patient's records. Offer the consent gate, and
   /// leave the form as it is so one more press saves it once access is given.
   Future<void> _askForConsent(String patientId) async {
@@ -1172,7 +1270,90 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
     ));
   }
 
-  Future<void> _submitRecord() async {
+  /// Show patient message preview dialog and handle send flow
+  Future<void> _showPatientMessagePreview(String recordId, String token) async {
+    try {
+      final preview = await ref.read(recordServiceProvider).previewPatientMessage(
+        idToken: token,
+        recordId: recordId,
+      );
+
+      if (!mounted) return;
+
+      // Show preview dialog using the actual PatientMessagePreviewDialog
+      final shouldSend = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => PatientMessagePreviewDialog(
+          previewData: preview,
+        ),
+      );
+
+      if (shouldSend == true) {
+        if (!mounted) return;
+        
+        // Show loading
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => const Center(child: CircularProgressIndicator()),
+        );
+
+        try {
+          await ref.read(recordServiceProvider).sendPatientMessage(
+            idToken: token,
+            recordId: recordId,
+          );
+
+          if (!mounted) return;
+          Navigator.pop(context); // Close loading
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Message sent successfully to patient'),
+              backgroundColor: Color(0xFF2E7D32),
+            ),
+          );
+
+          // Navigate away
+          if (context.canPop()) {
+            context.pop();
+          } else {
+            context.go('/doctor/today-appointments');
+          }
+        } catch (e) {
+          if (!mounted) return;
+          Navigator.pop(context); // Close loading
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to send message: ${e.toString().replaceAll('Exception: ', '')}'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      } else {
+        // User cancelled - stay on form
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Record saved. Message not sent.'),
+            backgroundColor: Color(0xFF546E7A),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Preview failed: ${e.toString().replaceAll('Exception: ', '')}'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  Future<void> _submitRecord({bool send = false}) async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -1321,7 +1502,7 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
 
     try {
       final recordService = ref.read(recordServiceProvider);
-      await recordService.createMedicalRecord(
+      final createdRecord = await recordService.createMedicalRecord(
         idToken: token,
         patientId: patientId,
         doctorId: doctorId,
@@ -1333,11 +1514,19 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
         overrideReason: _conflicts.isNotEmpty ? overrideReason : null,
       );
 
+      final recordId = createdRecord['id']?.toString();
+
       // Invalidate appointment queue so the status updates to 'completed'
       ref.invalidate(doctorTodayAppointmentsProvider);
       ref.invalidate(_patientHistoryProvider);
 
       if (!mounted) return;
+
+      // If send=true, show preview dialog instead of success dialog
+      if (send && recordId != null) {
+        await _showPatientMessagePreview(recordId, token);
+        return;
+      }
 
       // Show success dialog
       await showDialog(
@@ -1716,6 +1905,7 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
                       entry: item,
                       onDelete: () => _removePrescription(index),
                       onChanged: _invalidateInteractionCheck,
+                      onAutofill: _autofillSchedules,
                     );
                   },
                 ),
@@ -1786,6 +1976,43 @@ class _DoctorAddRecordScreenState extends ConsumerState<DoctorAddRecordScreen> {
                     backgroundColor: _conflicts.isNotEmpty
                         ? const Color(0xFFC62828)
                         : const Color(0xFF006D77),
+                    foregroundColor: Colors.white,
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // ── Save & Send to Patient Button ───────────────────────
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: (_isSubmitting || _isCheckingInteractions)
+                      ? null
+                      : () => _submitRecord(send: true),
+                  icon: (_isSubmitting || _isCheckingInteractions)
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.send),
+                  label: Text(
+                    _isCheckingInteractions
+                        ? 'Checking Interactions...'
+                        : _isSubmitting
+                            ? 'Saving & Preparing Message...'
+                            : 'Save & Send to Patient',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
                     foregroundColor: Colors.white,
                     elevation: 2,
                     shape: RoundedRectangleBorder(
@@ -2076,12 +2303,16 @@ class _PrescriptionCard extends StatelessWidget {
   /// verdict — a warning computed for "Ibuprofen" must not survive an edit
   /// to "Ibuprofen 400mg with food", let alone to a different drug.
   final VoidCallback onChanged;
+  
+  /// Fired when dosage/duration lose focus to trigger schedule autofill
+  final VoidCallback? onAutofill;
 
   const _PrescriptionCard({
     required this.index,
     required this.entry,
     required this.onDelete,
     required this.onChanged,
+    this.onAutofill,
   });
 
   @override
@@ -2109,6 +2340,9 @@ class _PrescriptionCard extends StatelessWidget {
     final dosage = TextFormField(
       controller: entry.dosageController,
       onChanged: (_) => onChanged(),
+      onTapOutside: (_) {
+        if (onAutofill != null) onAutofill!();
+      },
       decoration: InputDecoration(
         labelText: 'Dosage *',
         hintText: 'e.g. 500mg TDS',
@@ -2127,6 +2361,9 @@ class _PrescriptionCard extends StatelessWidget {
     final duration = TextFormField(
       controller: entry.durationController,
       onChanged: (_) => onChanged(),
+      onTapOutside: (_) {
+        if (onAutofill != null) onAutofill!();
+      },
       decoration: InputDecoration(
         labelText: 'Duration *',
         hintText: 'e.g. 5 days',
@@ -2219,9 +2456,214 @@ class _PrescriptionCard extends StatelessWidget {
                       ],
                     ),
             ),
+            const SizedBox(height: 12),
+            // ── Schedule Chips ──────────────────────────────────────
+            _ScheduleChipRow(
+              entry: entry,
+              onChanged: onChanged,
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Schedule Chip Row — slots, food relation, PRN
+// ────────────────────────────────────────────────────────────────────────────
+
+class _ScheduleChipRow extends StatefulWidget {
+  final _PrescriptionEntry entry;
+  final VoidCallback onChanged;
+
+  const _ScheduleChipRow({
+    required this.entry,
+    required this.onChanged,
+  });
+
+  @override
+  State<_ScheduleChipRow> createState() => _ScheduleChipRowState();
+}
+
+class _ScheduleChipRowState extends State<_ScheduleChipRow> {
+  static const _slots = ['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT'];
+  static const _slotIcons = {
+    'MORNING': Icons.wb_sunny,
+    'AFTERNOON': Icons.light_mode,
+    'EVENING': Icons.wb_twilight,
+    'NIGHT': Icons.nightlight_round,
+  };
+  static const _slotLabels = {
+    'MORNING': 'Morning',
+    'AFTERNOON': 'Afternoon',
+    'EVENING': 'Evening',
+    'NIGHT': 'Night',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 640;
+        return wide ? _buildWideLayout() : _buildNarrowLayout();
+      },
+    );
+  }
+
+  Widget _buildWideLayout() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _buildSlotChips(),
+              ),
+            ),
+            const SizedBox(width: 16),
+            _buildFoodSegment(),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _buildPrnToggle(),
+            if (widget.entry.prn) ...[
+              const SizedBox(width: 12),
+              Expanded(child: _buildPrnConditionField()),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNarrowLayout() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _buildSlotChips(),
+        ),
+        const SizedBox(height: 8),
+        _buildFoodSegment(),
+        const SizedBox(height: 8),
+        _buildPrnToggle(),
+        if (widget.entry.prn) ...[
+          const SizedBox(height: 8),
+          _buildPrnConditionField(),
+        ],
+      ],
+    );
+  }
+
+  List<Widget> _buildSlotChips() {
+    return _slots.map((slot) {
+      final selected = widget.entry.slots.contains(slot);
+      return FilterChip(
+        label: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_slotIcons[slot], size: 14),
+            const SizedBox(width: 4),
+            Text(_slotLabels[slot]!),
+          ],
+        ),
+        selected: selected,
+        onSelected: (bool value) {
+          setState(() {
+            if (value) {
+              widget.entry.slots.add(slot);
+            } else {
+              widget.entry.slots.remove(slot);
+            }
+            // Manual edit sets source to DOCTOR
+            widget.entry.source = 'DOCTOR';
+          });
+          widget.onChanged();
+        },
+        selectedColor: const Color(0xFF006D77).withValues(alpha: 0.2),
+        checkmarkColor: const Color(0xFF006D77),
+        visualDensity: VisualDensity.compact,
+      );
+    }).toList();
+  }
+
+  Widget _buildFoodSegment() {
+    return SegmentedButton<String>(
+      segments: const [
+        ButtonSegment(value: 'BEFORE', label: Text('Before food', style: TextStyle(fontSize: 12))),
+        ButtonSegment(value: 'AFTER', label: Text('After food', style: TextStyle(fontSize: 12))),
+        ButtonSegment(value: 'WITH', label: Text('With food', style: TextStyle(fontSize: 12))),
+        ButtonSegment(value: 'ANY', label: Text('Anytime', style: TextStyle(fontSize: 12))),
+      ],
+      selected: {if (widget.entry.foodRelation != null) widget.entry.foodRelation!},
+      onSelectionChanged: (Set<String> newSelection) {
+        setState(() {
+          widget.entry.foodRelation = newSelection.isEmpty ? null : newSelection.first;
+          widget.entry.source = 'DOCTOR';
+        });
+        widget.onChanged();
+      },
+      emptySelectionAllowed: true,
+      multiSelectionEnabled: false,
+      style: ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+  }
+
+  Widget _buildPrnToggle() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Checkbox(
+          value: widget.entry.prn,
+          onChanged: (bool? value) {
+            setState(() {
+              widget.entry.prn = value ?? false;
+              widget.entry.source = 'DOCTOR';
+              if (!widget.entry.prn) {
+                widget.entry.prnConditionController.clear();
+              }
+            });
+            widget.onChanged();
+          },
+          visualDensity: VisualDensity.compact,
+        ),
+        const Text('PRN (as needed)', style: TextStyle(fontSize: 13)),
+      ],
+    );
+  }
+
+  Widget _buildPrnConditionField() {
+    return TextFormField(
+      controller: widget.entry.prnConditionController,
+      onChanged: (_) {
+        widget.entry.source = 'DOCTOR';
+        widget.onChanged();
+      },
+      decoration: InputDecoration(
+        labelText: 'Condition',
+        hintText: 'e.g. fever, pain',
+        isDense: true,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        filled: true,
+        fillColor: Colors.grey.shade50,
+      ),
+      validator: (val) {
+        if (widget.entry.prn && (val?.trim().isEmpty ?? true)) {
+          return 'Specify condition for PRN medication';
+        }
+        return null;
+      },
     );
   }
 }

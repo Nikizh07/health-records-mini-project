@@ -360,6 +360,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     required String dob,
     required String gender,
     required String languagePref,
+    bool whatsappOptIn = false,
   }) async {
     if (state.idToken == null) {
       state = state.copyWith(
@@ -382,6 +383,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         gender: gender,
         languagePref: languagePref,
         phone: state.phoneNumber,
+        whatsappOptIn: whatsappOptIn,
       );
 
       await LocalCacheService.saveProfile(newProfile);
